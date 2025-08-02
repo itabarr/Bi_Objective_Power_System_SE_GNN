@@ -53,8 +53,7 @@ else:
     meas_pflow = np.array([40,43,11,21,54,57])
 
 # get data input
-dataset, x_mean, x_std, pflow_mean, pflow_std = data_from_pickles(folder, num_nfeat, num_efeat, num_nmeas, num_emeas, meas_v, meas_pflow)
-
+dataset, x_mean, x_std, pflow_mean, pflow_std = data_from_pickles(folder, num_nfeat, num_efeat, num_nmeas, num_emeas, meas_v, meas_pflow) # data is made of [nodes, edges, edge_features, labels/targets]
 random.shuffle(dataset)
 
 split_coef = 0.9
@@ -224,16 +223,27 @@ for epoch in progressBar(range(epochs), prefix = 'Progress:', suffix = 'Complete
     prop_std_th = float((prop_std_th/len(test_loader)).detach().float().numpy())
     
     # Append values to lists
-    rmse_v_list.append(rmse_v)
-    mae_v_list.append(mae_v)
-    rmse_th_list.append(rmse_th)
-    mae_th_list.append(mae_th)
-    rmse_loading_list.append(rmse_loading)
-    mae_loading_list.append(mae_loading)
-    rmse_loading_trafos_list.append(rmse_loading_trafos)
-    mae_loading_trafos_list.append(mae_loading_trafos)
-    prop_std_v_list.append(prop_std_v)
-    prop_std_th_list.append(prop_std_th)
+    # Voltage magnitude metrics
+    # RMSE = penalizes large errors, MAE = average error magnitude
+    rmse_v_list.append(rmse_v)   # Root Mean Squared Error for voltage magnitudes
+    mae_v_list.append(mae_v)     # Mean Absolute Error for voltage magnitudes
+
+    # Voltage angle (theta) metrics
+    rmse_th_list.append(rmse_th) # Root Mean Squared Error for voltage angles
+    mae_th_list.append(mae_th)   # Mean Absolute Error for voltage angles
+
+    # Line loading metrics
+    rmse_loading_list.append(rmse_loading)   # RMSE for line loadings (% of line capacity)
+    mae_loading_list.append(mae_loading)     # MAE for line loadings
+
+    # Transformer loading metrics
+    rmse_loading_trafos_list.append(rmse_loading_trafos) # RMSE for transformer loadings
+    mae_loading_trafos_list.append(mae_loading_trafos)   # MAE for transformer loadings
+
+    # Variance preservation metrics
+    # Measures how well the model captures the spread of the target variables
+    prop_std_v_list.append(prop_std_v)   # Predicted vs true std deviation ratio for voltages (%)
+    prop_std_th_list.append(prop_std_th) # Predicted vs true std deviation ratio for angles (%)
 
 
     
@@ -247,3 +257,29 @@ torch.save({
             }, f'{model_name}.pt')
 
 
+print(f"mae_v: {mae_v_list[-1]}")
+print(f"mae_th: {mae_th_list[-1]}")
+print(f"rmse_v: {rmse_v_list[-1]}")
+print(f"rmse_th: {rmse_th_list[-1]}")
+print(f"mae_loading: {mae_loading_list[-1]}")
+print(f"mae_loading_trafos: {mae_loading_trafos_list[-1]}")
+print(f"rmse_loading: {rmse_loading_list[-1]}")
+print(f"rmse_loading_trafos: {rmse_loading_trafos_list[-1]}")
+print(f"prop_std_v: {prop_std_v_list[-1]}")
+print(f"prop_std_th: {prop_std_th_list[-1]}")
+metrics = {
+    "rmse_v_list": rmse_v_list,
+    "mae_v_list": mae_v_list,
+    "rmse_th_list": rmse_th_list,
+    "mae_th_list": mae_th_list,
+    "rmse_loading_list": rmse_loading_list,
+    "mae_loading_list": mae_loading_list,
+    "rmse_loading_trafos_list": rmse_loading_trafos_list,
+    "mae_loading_trafos_list": mae_loading_trafos_list,
+    "prop_std_v_list": prop_std_v_list,
+    "prop_std_th_list": prop_std_th_list
+}
+
+# Save to a .pt file
+torch.save(metrics, f"validation_metrics_{model_name}.pt")
+print("✅ Metrics saved to validation_metrics.pt")
