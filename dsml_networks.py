@@ -1,18 +1,23 @@
-from typing import Tuple, Union
+from typing import Tuple, Union, Optional
 import pandas as pd
 import torch
+from torch import Tensor
 import torch.nn as nn
+from torch.nn import Parameter, Linear
 import torch_geometric.nn as nn_geo
 import torch.nn.functional as F
 import numpy as np
 from torch_geometric.nn.conv import GCN2Conv, FAConv, TAGConv, GINEConv, MessagePassing, GCNConv, ChebConv, GATv2Conv
+from torch_geometric.nn.inits import glorot, zeros
+from torch_geometric.typing import (OptPairTensor, Adj, Size, OptTensor)
+from torch_geometric.utils import remove_self_loops, add_self_loops, softmax, degree
+from torch_sparse import SparseTensor, set_diag
 from torch.nn import Linear, LeakyReLU
-from torch_geometric.utils import degree
 from torch_scatter import scatter
 
 
 class gnn_dsse(nn.Module):
-    def __init__(self, dim_feat, dim_dense, dim_out, num_layers, nonlin = 'leaky_relu', main_param =0.1, K = 3, bias = True, dropout = 0., theta = None, shared_weights = True, cached = True, add_self_loops = True, normalize = True, model = 'gcn2'):
+    def __init__(self, dim_feat, dim_dense, dim_out, num_layers, nonlin = 'leaky_relu', main_param = 0.1, K = 3, bias = True, dropout = 0., theta = None, shared_weights = True, cached = True, add_self_loops = True, normalize = True, model = 'gcn2'):
         super().__init__()
         self.channels = dim_feat
         self.main_param = main_param
@@ -158,9 +163,11 @@ class GAT_DSSE(nn.Module):
     def forward(self,x, edge_index, edge_attr):
         return self.model(x, edge_index,edge_attr)
     
-# LipschitzNorm is a custom layer that calculates a normalizated attention coefficient such that the attention will be lipschitz continuous.
+# LipschitzNorm is the layer from the LipschitzNorm paper
+# it calculates a normalizated attention coefficient such that the attention will be lipschitz continuous for self attention that is calculated from a linear projection (no edge features).
+# I added att_e to account for the edge features
 class LipschitzNorm(nn.Module):
-    def __init__(self, att_norm = 4, recenter = False, scale_individually = True, eps = 1e-12):
+    def __init__(self, att_norm=4, recenter=False, scale_individually=True, eps=1e-12):
         super(LipschitzNorm, self).__init__()
         self.att_norm = att_norm
         self.eps = eps
@@ -168,40 +175,49 @@ class LipschitzNorm(nn.Module):
         self.scale_individually = scale_individually
 
     def forward(self, x, att, alpha, index):
-        att_l, att_r = att
-        
+        """
+        x: Node features (N, d)
+        att: (att_l, att_r)
+        alpha: raw attention scores
+        index: target node indices
+        """
+        att_l, att_r, att_e = att
         if self.recenter:
             mean = scatter(src = x, index = index, dim=0, reduce='mean')
             x = x - mean
-
-
         norm_x = torch.norm(x, dim=-1) ** 2
         max_norm = scatter(src = norm_x, index = index, dim=0, reduce = 'max').view(-1,1)
         max_norm = torch.sqrt(max_norm[index] + norm_x)  # simulation of max_j ||x_j||^2 + ||x_i||^2
 
-        
-        # scaling_factor =  4 * norm_att , where att = [ att_l | att_r ]         
-        if self.scale_individually == False:
-            norm_att = self.att_norm * torch.norm(torch.cat((att_l, att_r), dim=-1))
-        else:
-            norm_att = self.att_norm * torch.norm(torch.cat((att_l, att_r), dim=-1), dim=-1)
+        att_params = [att_l, att_r]
+        if att_e is not None:
+            att_params.append(att_e)
 
-        alpha = alpha / ( norm_att * max_norm + self.eps )
+        # Compute Frobenius norm of concatenated attentions
+        concat_att = torch.cat(att_params, dim=-1)
+        if not self.scale_individually:
+            norm_att = self.att_norm * torch.norm(concat_att)
+        else:
+            norm_att = self.att_norm * torch.norm(concat_att, dim=-1)
+
+        # Normalize alpha
+        alpha = alpha / (norm_att * max_norm + self.eps)
         return alpha
+
     
 # This is the lipschitznorm DeepGATConv layer and network
 # ----- IMPORTANT: This uses the original GATconv attention and not GATv2Conv attention, which might cause a drop in performance -----
 # The difference is the order of multplication and activation function in the attention calculation.
 # I think developing a lipschitz continuous GATv2Conv is too much work for the project, but maybe if we will have time later on
-# TODO: fix imports
+
 class DeepGATConv(MessagePassing):
-   
     _alpha: OptTensor
 
     def __init__(self, in_channels: Union[int, Tuple[int, int]],
                  out_channels: int, heads: int = 1, concat: bool = True,
                  negative_slope: float = 0.2, dropout: float = 0.,
-                 add_self_loops: bool = True, bias: bool = True, norm = None, **kwargs):
+                 add_self_loops: bool = True, bias: bool = True,
+                 norm=None, edge_dim: Optional[int] = None, **kwargs):
         super(DeepGATConv, self).__init__(aggr='add', node_dim=0, **kwargs)
 
         self.in_channels = in_channels
@@ -211,8 +227,8 @@ class DeepGATConv(MessagePassing):
         self.negative_slope = negative_slope
         self.dropout = dropout
         self.add_self_loops = add_self_loops
-        self.num_nodes, self.num_features, self.degrees = None, None, None
-        self.norm = norm    # normalization method: {lipschitznorm, neighbornorm, pairnorm, None}
+        self.norm = norm
+        self.edge_dim = edge_dim
 
         if isinstance(in_channels, int):
             self.lin_l = Linear(in_channels, heads * out_channels, bias=False)
@@ -220,8 +236,16 @@ class DeepGATConv(MessagePassing):
         else:
             self.lin_l = Linear(in_channels[0], heads * out_channels, False)
             self.lin_r = Linear(in_channels[1], heads * out_channels, False)
+
         self.att_l = Parameter(torch.Tensor(1, heads, out_channels))
         self.att_r = Parameter(torch.Tensor(1, heads, out_channels))
+
+        if edge_dim is not None:
+            self.lin_edge = Linear(edge_dim, heads * out_channels, bias=False)
+            self.att_e = Parameter(torch.Tensor(1, heads, out_channels))
+        else:
+            self.lin_edge = None
+            self.register_parameter('att_e', None)
 
         if bias and concat:
             self.bias = Parameter(torch.Tensor(heads * out_channels))
@@ -231,7 +255,6 @@ class DeepGATConv(MessagePassing):
             self.register_parameter('bias', None)
 
         self._alpha = None
-
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -240,71 +263,55 @@ class DeepGATConv(MessagePassing):
         glorot(self.att_l)
         glorot(self.att_r)
         zeros(self.bias)
+        if self.lin_edge is not None:
+            glorot(self.lin_edge.weight)
+            glorot(self.att_e)
 
-
-    def forward(self, x: Union[Tensor, OptPairTensor], edge_index: Adj,
+    def forward(self, x, edge_index: Adj, edge_attr: Optional[Tensor] = None,
                 size: Size = None, return_attention_weights=None):
-        r"""
-
-        Args:
-            return_attention_weights (bool, optional): If set to :obj:`True`,
-                will additionally return the tuple
-                :obj:`(edge_index, attention_weights)`, holding the computed
-                attention weights for each edge. (default: :obj:`None`)
-        """
-        self.num_nodes, self.num_features = x.shape[0], x.shape[1]
-        self.edge_index = edge_index
 
         H, C = self.heads, self.out_channels
-
-        x_l: OptTensor = None
-        x_r: OptTensor = None
-        alpha_l: OptTensor = None
-        alpha_r: OptTensor = None
+        self.edge_index = edge_index
 
         if isinstance(x, Tensor):
-            assert x.dim() == 2, 'Static graphs not supported in `GATConv`.'
-            x_l = x_r = self.lin_l(x).view(-1, H, C)    # Theta parameter: lin_l, lin_r
-
+            x_l = x_r = self.lin_l(x).view(-1, H, C)
             alpha_l = (x_l * self.att_l).sum(dim=-1)
             alpha_r = (x_r * self.att_r).sum(dim=-1)
- 
-
         else:
             x_l, x_r = x[0], x[1]
-            assert x[0].dim() == 2, 'Static graphs not supported in `GATConv`.'
-            x_l = self.lin_l(x_l).view(-1, H, C)        # Theta parameter: lin_l, lin_r
-            alpha_l = (x_l * self.att_l).sum(dim=-1)   
+            x_l = self.lin_l(x_l).view(-1, H, C)
+            alpha_l = (x_l * self.att_l).sum(dim=-1)
             if x_r is not None:
                 x_r = self.lin_r(x_r).view(-1, H, C)
                 alpha_r = (x_r * self.att_r).sum(dim=-1)
+            else:
+                alpha_r = None
 
-        assert x_l is not None
-        assert alpha_l is not None
+        edge_feat = None
+        alpha_e = None
+        if self.lin_edge is not None and edge_attr is not None:
+            edge_feat = self.lin_edge(edge_attr).view(-1, H, C)
+            alpha_e = (edge_feat * self.att_e).sum(dim=-1)
 
         if self.add_self_loops:
-            if isinstance(edge_index, Tensor):
-                num_nodes = x_l.size(0)
-                if x_r is not None:
-                    num_nodes = min(num_nodes, x_r.size(0))
-                if size is not None:
-                    num_nodes = min(size[0], size[1])
-                edge_index, _ = remove_self_loops(edge_index)
-                edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
-            elif isinstance(edge_index, SparseTensor):
-                edge_index = set_diag(edge_index)
+            num_nodes = x_l.size(0)
+            edge_index, edge_attr = add_self_loops(edge_index, edge_attr, fill_value=0, num_nodes=num_nodes)
 
-        # propagate_type: (x: OptPairTensor, alpha: OptPairTensor)
-
-        out = self.propagate(edge_index, x=(x_l, x_r),
-                             alpha=(alpha_l, alpha_r), size=size)
+        out = self.propagate(
+            edge_index,
+            x=(x_l, x_r),
+            alpha=(alpha_l, alpha_r),
+            edge_feat=edge_feat,
+            alpha_e=alpha_e,
+            size=size
+        )
 
         alpha = self._alpha
         self._alpha = None
         self.edge_index = None
 
         if self.concat:
-            out = out.view(-1, self.heads * self.out_channels)
+            out = out.view(-1, H * C)
         else:
             out = out.mean(dim=1)
 
@@ -313,24 +320,25 @@ class DeepGATConv(MessagePassing):
 
         if isinstance(return_attention_weights, bool):
             assert alpha is not None
-            if isinstance(edge_index, Tensor):
-                return out, (edge_index, alpha)
-            elif isinstance(edge_index, SparseTensor):
-                return out, edge_index.set_value(alpha, layout='coo')
-        else:
-            return out
+            return out, (edge_index, alpha)
+        return out
 
-    def message(self, x_j: Tensor, alpha_j: Tensor, alpha_i: OptTensor,
-                index: Tensor, ptr: OptTensor,
-                size_i: Optional[int]) -> Tensor:
+    def message(self, x_j, alpha_j, alpha_i, alpha_e,
+                index, ptr, size_i) -> Tensor:
 
         alpha = alpha_j if alpha_i is None else alpha_j + alpha_i
+        if alpha_e is not None:
+            alpha = alpha + alpha_e
 
+        if self.att_e is not None:
+            att = (self.att_l, self.att_r, self.att_e) # added the att_e parameter to the norm function to account for edge features
+        else:
+            att = (self.att_l, self.att_r)
         if self.norm is not None:
-            alpha = self.norm(x_j, att = (self.att_l, self.att_r), alpha = alpha, index = index)
-        
+            alpha = self.norm(x_j, att=att, alpha=alpha, index=index) 
+
         alpha = F.leaky_relu(alpha, self.negative_slope)
-        alpha = nn_geo.softmax(alpha, index, ptr, size_i)
+        alpha = softmax(alpha, index, ptr, size_i)
 
         self._alpha = alpha
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
@@ -342,14 +350,14 @@ class DeepGATConv(MessagePassing):
                                              self.in_channels,
                                              self.out_channels, self.heads)
 
-
+# TODO: edit this network to fit the dsmlGAT
 class DeepGAT(nn.Module):
     def __init__(self, idim, hdim, odim, heads, num_layers, norm = None , ogb=False):
 
         super(DeepGAT, self).__init__()
         self.num_layers = num_layers
         self.norm_name = norm
-        self.ogb= ogb
+        self.ogb = ogb
         # Normalization methods
         if self.norm_name == "lipschitznorm":
             self.norm = LipschitzNorm(scale_individually=False)
@@ -358,9 +366,9 @@ class DeepGAT(nn.Module):
         else:
             self.norm = None
 
-        self.layers = nn.ModuleList([DeepGATConv(hdim, hdim, heads=heads, dropout=0.3,norm=self.norm)])
+        self.layers = nn.ModuleList([DeepGATConv(hdim, hdim, heads=heads, dropout=0.3, norm=self.norm)])
         for _ in range(1,num_layers):
-            self.layers.append(DeepGATConv(heads * hdim, hdim, heads=heads, dropout=0.3,norm=self.norm))
+            self.layers.append(DeepGATConv(heads * hdim, hdim, heads=heads, dropout=0.3, norm=self.norm))
         
         self.lin = nn.Linear(idim, hdim)
         self.fc1 = nn.Linear(heads * hdim, odim)
@@ -379,8 +387,6 @@ class DeepGAT(nn.Module):
             h = layer(h, edge_index)
             if i < self.num_layers - 1:
                 h = F.elu(h)
-            if self.norm_name == "pairnorm" or self.norm_name == "pairnorm-si":
-                h = self.pairnorm(h)
 
         # return F.log_softmax(h, dim=1)  
         return F.log_softmax(self.fc1(h), dim=1)

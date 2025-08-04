@@ -12,7 +12,7 @@ import pandas as pd
 import pandapower as pp
 import numpy as np
 import torch
-from dsml_networks import gnn_dsse, GINE_DSSE, GAT_DSSE, MPN, SkipMPN, PFN, SkipPFN
+from dsml_networks import gnn_dsse, GINE_DSSE, GAT_DSSE, DeepGAT
 from dsml_data import data_from_pickles, get_pflow, gsp_wls, gsp_wls_edge
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
@@ -80,11 +80,20 @@ hyperparameters = {
     'L': 5
 }
 
+lipschitznorm_parameters = {'idim': 8,
+                            'hdim': 32,
+                            'odim': 2,
+                            'heads': 1,
+                            'num_layers': 8,
+                            'norm': "lipschitznorm",
+                            'ogb': False}
+
 # Setting up GNN model
 model_name = 'gat'
-model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'], dim_dense=hyperparameters['dim_hid'], dim_out=hyperparameters['dim_out'], heads=hyperparameters['heads'], num_layers=hyperparameters['gnn_layers'], edge_dim=hyperparameters['dim_lines'])
+model = GAT_DSSE(dim_feat=hyperparameters['dim_nodes'], dim_dense=hyperparameters['dim_hid'], dim_out=hyperparameters['dim_out'], heads=hyperparameters['heads'], num_layers=hyperparameters['gnn_layers'], edge_dim=hyperparameters['dim_lines'])
 
-# model = SkipPFN(dim_featn=hyperparameters['dim_nodes'], dim_feate=hyperparameters['dim_lines'], dim_out=hyperparameters['dim_out'], dim_hid=hyperparameters['dim_hid'], n_gnn_layers=hyperparameters['gnn_layers'], K=hyperparameters['K'], dropout_rate=hyperparameters['dropout_rate'], L=hyperparameters['L'])
+model_name = 'lipchitz_gat'
+model = DeepGAT(idim=lipschitznorm_parameters['idim'], hdim=lipschitznorm_parameters['hdim'], odim=lipschitznorm_parameters['odim'], heads=lipschitznorm_parameters['heads'], num_layers=lipschitznorm_parameters['num_layers'], norm=lipschitznorm_parameters['norm'])
 
 # Generate the optimizers.
 lr = 3e-3
