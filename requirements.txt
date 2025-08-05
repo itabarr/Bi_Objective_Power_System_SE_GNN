@@ -1,5 +1,5 @@
 # Safe requirements.txt (requires manual install of PyTorch/PyG)
-numpy>=1.23
+numpy==1.26.4
 pandas>=1.5
 scikit-learn>=1.1
 scipy>=1.9

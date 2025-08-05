@@ -12,7 +12,7 @@ import pandas as pd
 import pandapower as pp
 import numpy as np
 import torch
-from dsml_networks import gnn_dsse, GINE_DSSE, GAT_DSSE, DeepGAT
+from dsml_networks import gnn_dsse, GINE_DSSE, GAT_DSSE, DeepGAT_DSSE
 from dsml_data import data_from_pickles, get_pflow, gsp_wls, gsp_wls_edge
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
@@ -77,23 +77,28 @@ hyperparameters = {
     'heads': 1,
     'K': 2,
     'dropout_rate': 0.3,
-    'L': 5
+    'L': 5,
+    'norm': 'lipschitznorm'
 }
 
-lipschitznorm_parameters = {'idim': 8,
-                            'hdim': 32,
-                            'odim': 2,
-                            'heads': 1,
-                            'num_layers': 8,
-                            'norm': "lipschitznorm",
-                            'ogb': False}
-
 # Setting up GNN model
-model_name = 'gat'
-model = GAT_DSSE(dim_feat=hyperparameters['dim_nodes'], dim_dense=hyperparameters['dim_hid'], dim_out=hyperparameters['dim_out'], heads=hyperparameters['heads'], num_layers=hyperparameters['gnn_layers'], edge_dim=hyperparameters['dim_lines'])
+# model_name = 'gat'
+# model = GAT_DSSE(dim_feat=hyperparameters['dim_nodes'],
+#                 dim_dense=hyperparameters['dim_hid'],
+#                 dim_out=hyperparameters['dim_out'],
+#                 heads=hyperparameters['heads'],
+#                 num_layers=hyperparameters['gnn_layers'],
+#                 edge_dim=hyperparameters['dim_lines'])
 
 model_name = 'lipchitz_gat'
-model = DeepGAT(idim=lipschitznorm_parameters['idim'], hdim=lipschitznorm_parameters['hdim'], odim=lipschitznorm_parameters['odim'], heads=lipschitznorm_parameters['heads'], num_layers=lipschitznorm_parameters['num_layers'], norm=lipschitznorm_parameters['norm'])
+model = DeepGAT_DSSE(dim_feat=hyperparameters['dim_nodes'],
+                    dim_dense=hyperparameters['dim_hid'],
+                    dim_out=hyperparameters['dim_out'],
+                    heads=hyperparameters['heads'],
+                    num_layers=hyperparameters['gnn_layers'],
+                    edge_dim=hyperparameters['dim_lines'],
+                    norm=hyperparameters['norm'],
+                    dropout=hyperparameters['dropout_rate'])
 
 # Generate the optimizers.
 lr = 3e-3
@@ -290,5 +295,6 @@ metrics = {
 }
 
 # Save to a .pt file
-torch.save(metrics, f"validation_metrics_{model_name}.pt")
-print("✅ Metrics saved to validation_metrics.pt")
+file_metrics_name = f"validation_metrics_{model_name}_stablized.pt"
+torch.save(metrics, file_metrics_name)
+print(f"Metrics saved to {file_metrics_name}")

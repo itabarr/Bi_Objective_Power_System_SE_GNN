@@ -7,13 +7,13 @@ from torch.nn import Parameter, Linear
 import torch_geometric.nn as nn_geo
 import torch.nn.functional as F
 import numpy as np
-from torch_geometric.nn.conv import GCN2Conv, FAConv, TAGConv, GINEConv, MessagePassing, GCNConv, ChebConv, GATv2Conv
+from torch_geometric.nn.conv import GCN2Conv, FAConv, TAGConv, GINEConv, MessagePassing, GATv2Conv
 from torch_geometric.nn.inits import glorot, zeros
-from torch_geometric.typing import (OptPairTensor, Adj, Size, OptTensor)
-from torch_geometric.utils import remove_self_loops, add_self_loops, softmax, degree
-from torch_sparse import SparseTensor, set_diag
+from torch_geometric.typing import (Adj, Size, OptTensor)
+from torch_geometric.utils import add_self_loops, softmax
 from torch.nn import Linear, LeakyReLU
 from torch_scatter import scatter
+from torch_geometric.nn import Sequential as GeoSequential
 
 
 class gnn_dsse(nn.Module):
@@ -167,7 +167,7 @@ class GAT_DSSE(nn.Module):
 # it calculates a normalizated attention coefficient such that the attention will be lipschitz continuous for self attention that is calculated from a linear projection (no edge features).
 # I added att_e to account for the edge features
 class LipschitzNorm(nn.Module):
-    def __init__(self, att_norm=4, recenter=False, scale_individually=True, eps=1e-12):
+    def __init__(self, att_norm=4, recenter=False, scale_individually=True, eps=1e-6):
         super(LipschitzNorm, self).__init__()
         self.att_norm = att_norm
         self.eps = eps
@@ -181,6 +181,15 @@ class LipschitzNorm(nn.Module):
         alpha: raw attention scores
         index: target node indices
         """
+
+        # NaN detection
+        if torch.isnan(x).any():
+            print("NaN detected in x input")
+            return alpha
+        if torch.isnan(alpha).any():
+            print("NaN detected in alpha input")
+            return alpha
+
         att_l, att_r, att_e = att
         if self.recenter:
             mean = scatter(src = x, index = index, dim=0, reduce='mean')
@@ -201,10 +210,92 @@ class LipschitzNorm(nn.Module):
             norm_att = self.att_norm * torch.norm(concat_att, dim=-1)
 
         # Normalize alpha
-        alpha = alpha / (norm_att * max_norm + self.eps)
+        # Debug: Check intermediate values
+        denominator = norm_att * max_norm + self.eps
+        if torch.isnan(denominator).any() or (denominator == 0).any():
+            print(f"Issue with denominator: norm_att range [{norm_att.min():.6f}, {norm_att.max():.6f}]")
+            print(f"max_norm range [{max_norm.min():.6f}, {max_norm.max():.6f}]")
+            # Fallback: return original alpha
+            return alpha
+            
+        # Normalize alpha
+        alpha = alpha / denominator
+        
+        # Final NaN check
+        if torch.isnan(alpha).any():
+            print("NaN detected in alpha output - returning input alpha")
+            return att  # Return something safe
+            
         return alpha
 
-    
+# LipschitzNorm caused exploding values - this is the stablized version
+class StableLipschitzNorm(nn.Module):
+    def __init__(self, att_norm=1.0, recenter=False, scale_individually=True, eps=1e-6):
+        super(StableLipschitzNorm, self).__init__()
+        # Key changes:
+        # 1. Reduced att_norm from 4 to 1 (less aggressive normalization)
+        # 2. Increased eps from 1e-12 to 1e-6 (better numerical stability)
+        self.att_norm = att_norm
+        self.eps = eps
+        self.recenter = recenter
+        self.scale_individually = scale_individually
+
+    def forward(self, x, att, alpha, index):
+        """
+        x: Node features (N, d)
+        att: (att_l, att_r, att_e)
+        alpha: raw attention scores
+        index: target node indices
+        """
+        att_l, att_r, att_e = att
+        
+        if self.recenter:
+            mean = scatter(src=x, index=index, dim=0, reduce='mean')
+            x = x - mean[index]
+        
+        # More stable norm computation
+        # Instead of torch.norm(x, dim=-1) ** 2, use:
+        norm_x_squared = torch.sum(x * x, dim=-1)
+        
+        # Clamp to prevent extreme values
+        norm_x_squared = torch.clamp(norm_x_squared, min=0.0, max=1e4)
+        
+        max_norm_squared = scatter(src=norm_x_squared, index=index, dim=0, reduce='max').view(-1, 1)
+        
+        # Ensure the sum is positive before sqrt
+        combined_squared = max_norm_squared[index] + norm_x_squared
+        combined_squared = torch.clamp(combined_squared, min=self.eps)
+        max_norm = torch.sqrt(combined_squared)
+
+        att_params = [att_l, att_r]
+        if att_e is not None:
+            att_params.append(att_e)
+
+        # Compute Frobenius norm of concatenated attentions
+        concat_att = torch.cat(att_params, dim=-1)
+        
+        if not self.scale_individually:
+            norm_att = torch.norm(concat_att)
+            # Clamp the norm to prevent it from being too small or too large
+            norm_att = torch.clamp(norm_att, min=self.eps, max=10.0)
+            norm_att = self.att_norm * norm_att
+        else:
+            norm_att = torch.norm(concat_att, dim=-1)
+            norm_att = torch.clamp(norm_att, min=self.eps, max=10.0)
+            norm_att = self.att_norm * norm_att
+
+        # Compute denominator with better numerical stability
+        denominator = norm_att * max_norm + self.eps
+        
+        # Normalize alpha
+        alpha_normalized = alpha / denominator
+        
+        # Clamp the final result to prevent extreme values going into softmax
+        alpha_normalized = torch.clamp(alpha_normalized, min=-5.0, max=5.0)
+        
+        return alpha_normalized
+
+
 # This is the lipschitznorm DeepGATConv layer and network
 # ----- IMPORTANT: This uses the original GATconv attention and not GATv2Conv attention, which might cause a drop in performance -----
 # The difference is the order of multplication and activation function in the attention calculation.
@@ -227,7 +318,12 @@ class DeepGATConv(MessagePassing):
         self.negative_slope = negative_slope
         self.dropout = dropout
         self.add_self_loops = add_self_loops
-        self.norm = norm
+        if norm == "lipschitznorm":
+            self.norm = StableLipschitzNorm(scale_individually=False)
+        elif norm == 'lipschitznorm-si':
+            self.norm = StableLipschitzNorm(scale_individually=True)
+        else:
+            self.norm = None
         self.edge_dim = edge_dim
 
         if isinstance(in_channels, int):
@@ -257,15 +353,30 @@ class DeepGATConv(MessagePassing):
         self._alpha = None
         self.reset_parameters()
 
+    # def reset_parameters(self):
+    #     glorot(self.lin_l.weight)
+    #     glorot(self.lin_r.weight)
+    #     glorot(self.att_l)
+    #     glorot(self.att_r)
+    #     zeros(self.bias)
+    #     if self.lin_edge is not None:
+    #         glorot(self.lin_edge.weight)
+    #         glorot(self.att_e)
     def reset_parameters(self):
+        # Use Xavier/Glorot initialization but with smaller scale
         glorot(self.lin_l.weight)
         glorot(self.lin_r.weight)
-        glorot(self.att_l)
-        glorot(self.att_r)
-        zeros(self.bias)
+        
+        # Initialize attention parameters more conservatively
+        nn.init.xavier_uniform_(self.att_l, gain=0.1)
+        nn.init.xavier_uniform_(self.att_r, gain=0.1)
+        
+        if self.bias is not None:
+            zeros(self.bias)
         if self.lin_edge is not None:
             glorot(self.lin_edge.weight)
-            glorot(self.att_e)
+            nn.init.xavier_uniform_(self.att_e, gain=0.1)
+
 
     def forward(self, x, edge_index: Adj, edge_attr: Optional[Tensor] = None,
                 size: Size = None, return_attention_weights=None):
@@ -287,15 +398,15 @@ class DeepGATConv(MessagePassing):
             else:
                 alpha_r = None
 
+        if self.add_self_loops:
+            num_nodes = x_l.size(0)
+            edge_index, edge_attr = add_self_loops(edge_index, edge_attr, fill_value=0, num_nodes=num_nodes)
+
         edge_feat = None
         alpha_e = None
         if self.lin_edge is not None and edge_attr is not None:
             edge_feat = self.lin_edge(edge_attr).view(-1, H, C)
             alpha_e = (edge_feat * self.att_e).sum(dim=-1)
-
-        if self.add_self_loops:
-            num_nodes = x_l.size(0)
-            edge_index, edge_attr = add_self_loops(edge_index, edge_attr, fill_value=0, num_nodes=num_nodes)
 
         out = self.propagate(
             edge_index,
@@ -350,43 +461,62 @@ class DeepGATConv(MessagePassing):
                                              self.in_channels,
                                              self.out_channels, self.heads)
 
-# TODO: edit this network to fit the dsmlGAT
-class DeepGAT(nn.Module):
-    def __init__(self, idim, hdim, odim, heads, num_layers, norm = None , ogb=False):
-
-        super(DeepGAT, self).__init__()
+# TODO: make sure this network works with the new DeepGATConv layer, need to run and debug
+class DeepGAT_DSSE(nn.Module):
+    def __init__(self, dim_feat, dim_dense, dim_out, num_layers, edge_dim,
+                 heads=1, concat=True, slope=0.2, self_loops=True, dropout=0.,
+                 nonlin='leaky_relu', norm=None):
+        super().__init__()
+        self.dim_out = dim_out
         self.num_layers = num_layers
-        self.norm_name = norm
-        self.ogb = ogb
-        # Normalization methods
-        if self.norm_name == "lipschitznorm":
-            self.norm = LipschitzNorm(scale_individually=False)
-        elif self.norm_name == "lipschitznorm-si":
-            self.norm = LipschitzNorm(scale_individually=True)
+        self.dim_feat = dim_feat
+        self.dim_dense = dim_dense
+        self.edge_dim = edge_dim
+        self.dim_hidden = dim_feat
+
+        self.channels = dim_feat
+        self.heads = heads
+        self.concat = concat
+        self.slope = slope
+        self.dropout = dropout
+        self.self_loops = self_loops
+
+        if nonlin == 'relu':
+            self.nonlin = nn.ReLU()
+        elif nonlin == 'tanh':
+            self.nonlin = nn.Tanh()
+        elif nonlin == 'leaky_relu':
+            self.nonlin = LeakyReLU(slope)
         else:
-            self.norm = None
+            raise Exception('Invalid activation type')
 
-        self.layers = nn.ModuleList([DeepGATConv(hdim, hdim, heads=heads, dropout=0.3, norm=self.norm)])
-        for _ in range(1,num_layers):
-            self.layers.append(DeepGATConv(heads * hdim, hdim, heads=heads, dropout=0.3, norm=self.norm))
-        
-        self.lin = nn.Linear(idim, hdim)
-        self.fc1 = nn.Linear(heads * hdim, odim)
-        
-    def forward(self, batched_data):
-        # x, edge_index = batched_data.x, batched_data.edge_index
-        if self.ogb:
-            x, edge_index = batched_data.x, batched_data.adj_t
-        else:
-            x, edge_index = batched_data.x, batched_data.edge_index
+        nn_layer = []
+        # Build DeepGAT layers
+        for l in range(self.num_layers-1):
+            hyperparameters = {
+                "in_channels": self.channels,
+                "out_channels": self.channels,
+                "heads": self.heads,
+                "concat": self.concat,
+                "negative_slope": self.slope,
+                "dropout": self.dropout,
+                "add_self_loops": self.self_loops,
+                "edge_dim": self.edge_dim,
+                "norm": norm
+            }
+            nn_layer.extend([
+                (DeepGATConv(**hyperparameters), 'x, edge_index, edge_attr -> x'),
+                self.nonlin
+            ])
 
-        h = self.lin(x)
-        # h = x
-        for i, layer in enumerate(self.layers):
-            h = F.dropout(h, p=0.6, training = self.training)
-            h = layer(h, edge_index)
-            if i < self.num_layers - 1:
-                h = F.elu(h)
+        # Final dense layers
+        nn_layer.extend([
+            Linear(in_features=self.dim_hidden, out_features=self.dim_dense),
+            nn.ReLU(),
+            Linear(in_features=self.dim_dense, out_features=self.dim_out)
+        ])
 
-        # return F.log_softmax(h, dim=1)  
-        return F.log_softmax(self.fc1(h), dim=1)
+        self.model = GeoSequential('x, edge_index, edge_attr', nn_layer)
+
+    def forward(self, x, edge_index, edge_attr):
+        return self.model(x, edge_index, edge_attr)
