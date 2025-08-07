@@ -295,6 +295,6 @@ metrics = {
 }
 
 # Save to a .pt file
-file_metrics_name = f"validation_metrics_{model_name}_stablized.pt"
+file_metrics_name = f"validation_metrics_{model_name}_stabilized.pt"
 torch.save(metrics, file_metrics_name)
 print(f"Metrics saved to {file_metrics_name}")

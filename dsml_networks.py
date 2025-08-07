@@ -197,6 +197,8 @@ class LipschitzNorm(nn.Module):
         norm_x = torch.norm(x, dim=-1) ** 2
         max_norm = scatter(src = norm_x, index = index, dim=0, reduce = 'max').view(-1,1)
         max_norm = torch.sqrt(max_norm[index] + norm_x)  # simulation of max_j ||x_j||^2 + ||x_i||^2
+        max_norm = torch.clamp(max_norm, min=self.eps)
+        print(f"min x_norm = {torch.min(max_norm)}, max x_norm = {torch.max(max_norm)}")
 
         att_params = [att_l, att_r]
         if att_e is not None:
@@ -208,10 +210,13 @@ class LipschitzNorm(nn.Module):
             norm_att = self.att_norm * torch.norm(concat_att)
         else:
             norm_att = self.att_norm * torch.norm(concat_att, dim=-1)
+        print(f"min att_norm = {torch.min(norm_att)}, max att_norm = {torch.max(norm_att)}")
 
         # Normalize alpha
         # Debug: Check intermediate values
+        norm_att = torch.clamp(norm_att, min=1.0)
         denominator = norm_att * max_norm + self.eps
+        print(f"min denominator = {torch.min(denominator)}, max denominator = {torch.max(denominator)}")
         if torch.isnan(denominator).any() or (denominator == 0).any():
             print(f"Issue with denominator: norm_att range [{norm_att.min():.6f}, {norm_att.max():.6f}]")
             print(f"max_norm range [{max_norm.min():.6f}, {max_norm.max():.6f}]")
@@ -228,73 +233,60 @@ class LipschitzNorm(nn.Module):
             
         return alpha
 
-# LipschitzNorm caused exploding values - this is the stablized version
+# This is another Lipschitz Norm implementation, with balanced stabillity and theoretical guarantees.
 class StableLipschitzNorm(nn.Module):
-    def __init__(self, att_norm=1.0, recenter=False, scale_individually=True, eps=1e-6):
+    def __init__(self, att_norm=4, recenter=False, scale_individually=True, eps=1e-8):
         super(StableLipschitzNorm, self).__init__()
-        # Key changes:
-        # 1. Reduced att_norm from 4 to 1 (less aggressive normalization)
-        # 2. Increased eps from 1e-12 to 1e-6 (better numerical stability)
         self.att_norm = att_norm
         self.eps = eps
         self.recenter = recenter
         self.scale_individually = scale_individually
 
     def forward(self, x, att, alpha, index):
-        """
-        x: Node features (N, d)
-        att: (att_l, att_r, att_e)
-        alpha: raw attention scores
-        index: target node indices
-        """
         att_l, att_r, att_e = att
         
         if self.recenter:
             mean = scatter(src=x, index=index, dim=0, reduce='mean')
             x = x - mean[index]
         
-        # More stable norm computation
-        # Instead of torch.norm(x, dim=-1) ** 2, use:
-        norm_x_squared = torch.sum(x * x, dim=-1)
+        norm_x_squared = torch.sum(x * x, dim=-1, keepdim=False)
+        max_norm_squared = scatter(src=norm_x_squared, index=index, dim=0, reduce='max')
+        max_norm_squared = max_norm_squared.view(-1, 1)
         
-        # Clamp to prevent extreme values
-        norm_x_squared = torch.clamp(norm_x_squared, min=0.0, max=1e4)
-        
-        max_norm_squared = scatter(src=norm_x_squared, index=index, dim=0, reduce='max').view(-1, 1)
-        
-        # Ensure the sum is positive before sqrt
-        combined_squared = max_norm_squared[index] + norm_x_squared
-        combined_squared = torch.clamp(combined_squared, min=self.eps)
-        max_norm = torch.sqrt(combined_squared)
+        combined_norm_squared = max_norm_squared[index] + norm_x_squared
+        combined_norm_squared = torch.clamp(combined_norm_squared, min=self.eps * self.eps)
+        max_norm = torch.sqrt(combined_norm_squared)
 
         att_params = [att_l, att_r]
         if att_e is not None:
             att_params.append(att_e)
 
-        # Compute Frobenius norm of concatenated attentions
         concat_att = torch.cat(att_params, dim=-1)
         
+        # IMPROVEMENT: Add bounds on norm_att
         if not self.scale_individually:
-            norm_att = torch.norm(concat_att)
-            # Clamp the norm to prevent it from being too small or too large
-            norm_att = torch.clamp(norm_att, min=self.eps, max=10.0)
+            norm_att = torch.norm(concat_att, p='fro')
+            norm_att = torch.clamp(norm_att, min=self.eps, max=100.0)  # Prevent extreme values
             norm_att = self.att_norm * norm_att
         else:
-            norm_att = torch.norm(concat_att, dim=-1)
-            norm_att = torch.clamp(norm_att, min=self.eps, max=10.0)
+            norm_att = torch.norm(concat_att, p=2, dim=-1)
+            norm_att = torch.clamp(norm_att, min=self.eps, max=100.0)
             norm_att = self.att_norm * norm_att
 
-        # Compute denominator with better numerical stability
         denominator = norm_att * max_norm + self.eps
-        
-        # Normalize alpha
         alpha_normalized = alpha / denominator
         
-        # Clamp the final result to prevent extreme values going into softmax
-        alpha_normalized = torch.clamp(alpha_normalized, min=-5.0, max=5.0)
+        # IMPROVEMENT: Better fallback strategy
+        if torch.isnan(alpha_normalized).any() or torch.isinf(alpha_normalized).any():
+            print("Warning: Numerical instability in LipschitzNorm, using fallback")
+            # Return original alpha with mild scaling to be safe
+            return alpha * 0.1
+        
+        # IMPROVEMENT: Reasonable bounds for softmax stability
+        # Values beyond ±10 cause softmax to saturate anyway
+        alpha_normalized = torch.clamp(alpha_normalized, min=-8.0, max=8.0)
         
         return alpha_normalized
-
 
 # This is the lipschitznorm DeepGATConv layer and network
 # ----- IMPORTANT: This uses the original GATconv attention and not GATv2Conv attention, which might cause a drop in performance -----
