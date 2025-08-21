@@ -13,7 +13,7 @@ from torch_geometric.loader import DataLoader
 # Add parent directory to path to import from main project
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from dsml_data import data_from_pickles
+from data._dsml_data import data_from_pickles
 
 
 class DeepGATDataLoader:

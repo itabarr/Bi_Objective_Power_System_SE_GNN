@@ -24,7 +24,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 # Import original functions
 from dsml_networks import gnn_dsse, GINE_DSSE, GAT_DSSE
 from deepgat_ml.models import DeepGAT_DSSE
-from dsml_data import data_from_pickles, get_pflow, gsp_wls, gsp_wls_edge
+from data._dsml_data import data_from_pickles, get_pflow, gsp_wls, gsp_wls_edge
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 import random

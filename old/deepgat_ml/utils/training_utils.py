@@ -14,7 +14,7 @@ from torchmetrics.regression import MeanAbsoluteError
 # Add parent directory to path to import from main project
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from dsml_data import gsp_wls_edge
+from data._dsml_data import gsp_wls_edge
 from dsml_loadsampling import progressBar
 
 
