@@ -481,7 +481,6 @@ def get_pflow(y, edge_index, node_param, edge_param, phase_shift=True):
 
     return loading_lines, loading_trafo, P_ij_from, Q_ij_from, P_ij_to, Q_ij_to, I_ij_from, I_ij_to  # loading in %, P in MW, Q in MVAr, I in kA
 
-
 def gsp_wls_edge(input, edge_input, output, x_mean, x_std, edge_mean, edge_std, edge_index, reg_coefs, num_samples, node_param, edge_param):
     """
     Computes the weighted least squares (WLS) loss for node and edge measurements,
@@ -584,8 +583,7 @@ def gsp_wls_edge(input, edge_input, output, x_mean, x_std, edge_mean, edge_std, 
     J_reg = J +  J_v +  J_theta +  J_loading # [1,1]
     
     return J_reg
-    
-    
+     
 def gsp_wls(input, output, x_mean, x_std, edge_index, reg_coefs, grid, num_samples):
     """
     Computes the weighted least squares (WLS) loss for node measurements,

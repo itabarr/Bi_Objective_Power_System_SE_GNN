@@ -48,15 +48,29 @@ class DeepGATDataLoader:
 
         # Load data using the existing data_from_pickles function
         # Note: This assumes the pickle files exist and were created by the data pipeline
-        self.train_data, self.test_data = data_from_pickles(
+        # The function returns: data_list, x_mean, x_std, pflow_mean, pflow_std
+        data_list, x_mean, x_std, pflow_mean, pflow_std = data_from_pickles(
             folder=self.data_folder,
-            num_nfeat=8,  # From DATA_CONFIG
-            num_efeat=6,  # From DATA_CONFIG
-            num_nmeas=4,  # From DATA_CONFIG
-            num_emeas=2,  # From DATA_CONFIG
+            num_nfeat=11,  # Updated to match actual data
+            num_efeat=13,  # Updated to match actual data
+            num_nmeas=4,   # From DATA_CONFIG
+            num_emeas=2,   # From DATA_CONFIG
             meas_v=self.meas_indices['meas_v'],
             meas_pflow=self.meas_indices['meas_p']  # Use meas_p as meas_pflow
         )
+
+        # Split data into train and test (90% train, 10% test)
+        import random
+        random.shuffle(data_list)
+        split_idx = int(0.9 * len(data_list))
+        self.train_data = data_list[:split_idx]
+        self.test_data = data_list[split_idx:]
+
+        # Store normalization parameters for potential use
+        self.x_mean = x_mean
+        self.x_std = x_std
+        self.pflow_mean = pflow_mean
+        self.pflow_std = pflow_std
         
         print(f"Loaded {len(self.train_data)} training samples")
         print(f"Loaded {len(self.test_data)} test samples")

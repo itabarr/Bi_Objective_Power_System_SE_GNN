@@ -20,19 +20,21 @@ from dsml_loadsampling import progressBar
 
 class DeepGATTrainer:
     """Trainer class for DeepGAT model."""
-    
-    def __init__(self, model, config, device):
+
+    def __init__(self, model, config, device, normalization_params=None):
         """
         Initialize the trainer.
-        
+
         Args:
             model: DeepGAT model instance
             config: Training configuration dictionary
             device: PyTorch device (cuda/cpu)
+            normalization_params: Dictionary with x_mean, x_std, pflow_mean, pflow_std
         """
         self.model = model.to(device)
         self.config = config
         self.device = device
+        self.normalization_params = normalization_params or {}
         
         # Initialize optimizer
         optimizer_class = getattr(optim, config['optimizer'])
@@ -59,28 +61,48 @@ class DeepGATTrainer:
         """Train for one epoch."""
         self.model.train()
         total_loss = 0
-        
+
+        # Use default normalization parameters (identity normalization)
+        x_mean = torch.zeros(8).to(self.device)   # Only for measurement features
+        x_std = torch.ones(8).to(self.device)     # Only for measurement features
+        pflow_mean = torch.zeros(6).to(self.device)  # Only for measurement features
+        pflow_std = torch.ones(6).to(self.device)    # Only for measurement features
+
+        # Data dimensions (measurements only, not total features)
+        num_nfeat = 8   # Node measurement features (not total)
+        num_efeat = 6   # Edge measurement features (not total)
+
         for data in train_loader:
             data = data.to(self.device)
             num_samples = data.batch[-1] + 1
-            
+
             self.optimizer.zero_grad()
-            
-            # Forward pass
-            out = self.model(data.x, data.edge_index, data.edge_attr)
-            
-            # Calculate loss using GSP-WLS
+
+            # Forward pass - use only the measurement features
+            out = self.model(data.x[:, :num_nfeat], data.edge_index, data.edge_attr[:, :num_efeat])
+
+            # Calculate loss using GSP-WLS with correct parameters
             loss = gsp_wls_edge(
-                out, data.y, data.edge_index, data.edge_attr,
-                data.batch, num_samples, loss_coefficients
+                input=data.x[:, :num_nfeat],           # Node measurements
+                edge_input=data.edge_attr[:, :num_efeat], # Edge measurements
+                output=out,                             # Model output
+                x_mean=x_mean,                         # Node normalization mean
+                x_std=x_std,                           # Node normalization std
+                edge_mean=pflow_mean,                  # Edge normalization mean
+                edge_std=pflow_std,                    # Edge normalization std
+                edge_index=data.edge_index,            # Edge connectivity
+                reg_coefs=loss_coefficients,           # Regularization coefficients
+                num_samples=num_samples,               # Number of samples in batch
+                node_param=data.x[:, num_nfeat:],      # Node parameters (covariances)
+                edge_param=data.edge_attr[:, num_efeat:] # Edge parameters (covariances)
             )
-            
+
             # Backward pass
             loss.backward()
             self.optimizer.step()
-            
+
             total_loss += loss.item()
-        
+
         avg_loss = total_loss / len(train_loader)
         self.train_losses.append(avg_loss)
         return avg_loss
@@ -192,16 +214,17 @@ class DeepGATTrainer:
         return checkpoint.get('epoch', 0)
 
 
-def create_trainer(model, training_config, device):
+def create_trainer(model, training_config, device, normalization_params=None):
     """
     Create a trainer instance.
-    
+
     Args:
         model: DeepGAT model instance
         training_config: Training configuration dictionary
         device: PyTorch device
-        
+        normalization_params: Dictionary with normalization parameters
+
     Returns:
         DeepGATTrainer: Configured trainer instance
     """
-    return DeepGATTrainer(model, training_config, device)
+    return DeepGATTrainer(model, training_config, device, normalization_params)

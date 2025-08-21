@@ -15,8 +15,8 @@ DATA_CONFIG = {
     'case': 'cigre14',
     'folder': 'data/cigre14/',
     'phase_shift': True,
-    'num_nfeat': 8,
-    'num_efeat': 6,
+    'num_nfeat': 11,  # Updated to match actual data
+    'num_efeat': 13,  # Updated to match actual data
     'num_nmeas': 4,
     'num_emeas': 2,
 }
@@ -24,18 +24,18 @@ DATA_CONFIG = {
 # Measurement indices for different grids
 MEASUREMENT_INDICES = {
     'cigre14': {
-        'meas_v': np.array([0, 1, 12, 7, 11, 14]),
-        'meas_p': np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]),
-        'meas_q': np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])
+        'meas_v': np.array([0, 1, 12, 7, 11, 13]),  # Fixed: removed index 14, replaced with 13
+        'meas_p': np.array([0, 10]),  # Using meas_pflow from original working script
+        'meas_q': np.array([0, 10])   # Using same as meas_p for consistency
     }
 }
 
 # Model hyperparameters
 MODEL_CONFIG = {
-    'dim_nodes': 8,
-    'dim_lines': 6,
+    'dim_nodes': 11,  # Updated to match actual data: 11 node features
+    'dim_lines': 13,  # Updated to match actual data: 13 edge features
     'dim_hid': 64,
-    'dim_out': 4,
+    'dim_out': 2,     # Updated to match actual data: 2 target features
     'heads': 4,
     'gnn_layers': 3,
     'dropout_rate': 0.3,
