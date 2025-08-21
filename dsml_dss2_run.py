@@ -12,7 +12,8 @@ import pandas as pd
 import pandapower as pp
 import numpy as np
 import torch
-from dsml_networks import gnn_dsse, GINE_DSSE, GAT_DSSE, DeepGAT_DSSE
+from dsml_networks import gnn_dsse, GINE_DSSE, GAT_DSSE
+from deepgat_ml.models import DeepGAT_DSSE
 from dsml_data import data_from_pickles, get_pflow, gsp_wls, gsp_wls_edge
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader

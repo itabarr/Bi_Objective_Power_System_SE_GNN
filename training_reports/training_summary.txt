@@ -1,0 +1,23 @@
+
+DEEPGAT TRAINING SUMMARY - CIGRE14
+==================================
+
+🎯 FINAL PERFORMANCE:
+   Voltage MAE:  0.0440 p.u.
+   Voltage RMSE: 0.0515 p.u.
+   Angle MAE:    0.0331 rad
+   Angle RMSE:   0.0416 rad
+
+📈 TRAINING STATS:
+   Total Epochs: 600
+   Best V MAE:   0.0430 p.u.
+   Best V RMSE:  0.0502 p.u.
+
+🚀 STATUS: EXCELLENT - PRODUCTION READY
+
+📁 FILES GENERATED:
+   • deepgat_training_report.txt - Complete technical report
+   • training_metrics.json - Structured metrics data
+   • deepgat_cigre14_20250821_195408.pt - Trained model checkpoint
+
+Generated: 2025-08-21 19:54:09

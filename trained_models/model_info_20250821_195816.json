@@ -1,0 +1,18 @@
+{
+  "model_files": {
+    "comprehensive_checkpoint": "deepgat_cigre14_production_20250821_195816.pt",
+    "weights_only": "deepgat_weights_only_20250821_195816.pt"
+  },
+  "quick_stats": {
+    "voltage_mae": 0.044035106897354126,
+    "voltage_rmse": 0.05145561695098877,
+    "angle_mae": 0.03310485929250717,
+    "angle_rmse": 0.04159427061676979,
+    "overall_rating": "EXCELLENT",
+    "production_ready": true
+  },
+  "usage_example": {
+    "python_code": "\n# Load the trained DeepGAT model\nimport torch\nfrom deepgat_ml.models import DeepGAT_DSSE\n\n# Load model checkpoint\ncheckpoint = torch.load('deepgat_cigre14_production_20250821_195816.pt')\nmodel_state = checkpoint['model_state_dict']\n\n# Initialize model with same architecture\nmodel = DeepGAT_DSSE(\n    dim_feat=8, dim_dense=64, dim_out=4, heads=4,\n    num_layers=3, edge_dim=6, norm='lipschitznorm', dropout=0.3\n)\n\n# Load trained weights\nmodel.load_state_dict(model_state)\nmodel.eval()\n\n# Use for inference\n# output = model(node_features, edge_index, edge_features)\n"
+  },
+  "timestamp": "2025-08-21T19:58:16.471790"
+}
