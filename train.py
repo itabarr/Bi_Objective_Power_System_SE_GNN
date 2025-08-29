@@ -6,6 +6,7 @@ import torch.optim as optim
 from data._dsml_data import gsp_wls_edge, get_pflow
 
 from data_processing import PowerSystemDataLoader
+from ref_models import GAT_DSSE
 from models import DeepGAT_DSSE
 from utils import get_device
 import live_plot
@@ -48,16 +49,24 @@ hyperparameters = {
     'norm': 'lipschitznorm'
 }
 
+model_name = 'gat'
+model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
+                dim_dense=hyperparameters['dim_hid'],
+                dim_out=hyperparameters['dim_out'],
+                heads=hyperparameters['heads'],
+                num_layers=hyperparameters['gnn_layers'],
+                edge_dim=hyperparameters['dim_lines'])
 
-model_name = 'lipchitz_gat'
-model = DeepGAT_DSSE(dim_feat=hyperparameters['dim_nodes'],
-                    dim_dense=hyperparameters['dim_hid'],
-                    dim_out=hyperparameters['dim_out'],
-                    heads=hyperparameters['heads'],
-                    num_layers=hyperparameters['gnn_layers'],
-                    edge_dim=hyperparameters['dim_lines'],
-                    norm=hyperparameters['norm'],
-                    dropout=hyperparameters['dropout_rate'])
+
+# model_name = 'lipchitz_gat'
+# model = DeepGAT_DSSE(dim_feat=hyperparameters['dim_nodes'],
+#                     dim_dense=hyperparameters['dim_hid'],
+#                     dim_out=hyperparameters['dim_out'],
+#                     heads=hyperparameters['heads'],
+#                     num_layers=hyperparameters['gnn_layers'],
+#                     edge_dim=hyperparameters['dim_lines'],
+#                     norm=hyperparameters['norm'],
+#                     dropout=hyperparameters['dropout_rate'])
 
 # Generate the optimizers.
 lr = 3e-3
