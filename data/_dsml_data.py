@@ -5,6 +5,27 @@ from torch_geometric.data import InMemoryDataset, download_url, Data
 import pickle
 from torch_geometric.utils import scatter, get_laplacian
 
+def angular_distance(pred_angles, true_angles):
+    """
+    Calculate the shortest angular distance between angles.
+
+    Parameters
+    ----------
+    pred_angles : torch.Tensor
+        Predicted angles in radians
+    true_angles : torch.Tensor
+        True angles in radians
+
+    Returns
+    -------
+    torch.Tensor
+        Angular distance in radians, wrapped to [-π, π]
+    """
+    diff = pred_angles - true_angles
+    # Wrap to [-π, π] using the shortest path
+    diff = torch.remainder(diff + torch.pi, 2 * torch.pi) - torch.pi
+    return diff
+
 def get_bus_param(net):
     """
     Extracts bus parameters from a given network object.
@@ -438,10 +459,13 @@ def gsp_wls_edge(input, edge_input, output, x_mean, x_std, edge_mean, edge_std, 
     theta_ij = torch.abs(torch.gather(theta_i[:,0],0, indices_from) - torch.gather(theta_i[:,0],0,indices_to))
 
     h = torch.concatenate([v_i, theta_i, torch.unsqueeze(p_i,1), torch.unsqueeze(q_i,1)], dim = 1) # [batch*num_nodes, 4]
-    
+
     h_edge = torch.concatenate([ torch.unsqueeze(p_from,1),  torch.unsqueeze(q_from,1)], dim =1)
 
+    # Calculate delta with proper angular distance for angle component (index 1)
     delta = Z - h  # [batch*num_nodes, 4]
+    # Fix angle differences to use angular distance
+    delta[:, 1:2] = angular_distance(Z[:, 1:2], h[:, 1:2])
     
     delta_edge = edge_Z - h_edge
     

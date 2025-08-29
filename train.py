@@ -3,13 +3,25 @@ import torch.nn.functional as F
 from torchmetrics.regression import MeanAbsoluteError
 import torch.optim as optim
 
-from data._dsml_data import gsp_wls_edge, get_pflow
+from data._dsml_data import gsp_wls_edge, get_pflow, angular_distance
 
 from data_processing import PowerSystemDataLoader
 from ref_models import GAT_DSSE
 from models import DeepGAT_DSSE
 from utils import get_device
 import live_plot
+
+
+
+def angular_mae(pred_angles, true_angles):
+    """Calculate Mean Absolute Error for angles with proper wrapping."""
+    diff = angular_distance(pred_angles, true_angles)
+    return torch.mean(torch.abs(diff))
+
+def angular_rmse(pred_angles, true_angles):
+    """Calculate Root Mean Square Error for angles with proper wrapping."""
+    diff = angular_distance(pred_angles, true_angles)
+    return torch.sqrt(torch.mean(diff**2))
 
 # GENERAL PARAMETERS
 phase_shift = True
@@ -189,9 +201,9 @@ for epoch in range(epochs):
             total_rmse_v += torch.sqrt(F.mse_loss(out[:, :1], data.y[:, :1])).item()
             total_mae_v += mae(out[:, :1], data.y[:, :1]).item()
             
-            # Voltage angle
-            total_rmse_th += torch.sqrt(F.mse_loss(out[:, 1:], data.y[:, 1:])).item()
-            total_mae_th += mae(out[:, 1:], data.y[:, 1:]).item()
+            # Voltage angle - using proper angular distance
+            total_rmse_th += angular_rmse(out[:, 1:], data.y[:, 1:]).item()
+            total_mae_th += angular_mae(out[:, 1:], data.y[:, 1:]).item()
             
             # Power flow calculations
             true_loading_lines, true_loading_trafos = get_pflow(
