@@ -1,7 +1,7 @@
 import pandas as pd
 import pandapower as pp
 import numpy as np
-from _data._dsml_data import data_from_pickles
+from data._dsml_data import data_from_pickles
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 import random
