@@ -2,10 +2,13 @@ import pandas as pd
 import pandapower as pp
 import numpy as np
 from data._dsml_data import data_from_pickles
+import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
+from torch_geometric.data import Dataset, Data
 import random
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
+import os
 
 
 class PowerSystemDataLoader:
@@ -312,20 +315,8 @@ class PowerSystemDataLoader:
 # Example usage
 if __name__ == "__main__":
     # Create data loader with default configuration
-    data_loader = PowerSystemDataLoader()
+    power_system_dataset = PowerSystemDataset(case='cigre14', batch_size=64, split_coef=0.9)
 
-    # Run complete pipeline
-    train_loader, test_loader = data_loader.setup_complete_pipeline()
-
-    # Print sample data with node features table
-    # data_loader.print_sample_data(num_nodes=5, sample_idx=0)
-
-    # Example of accessing the data variables
-    dataset = data_loader.dataset
-    x_mean = data_loader.x_mean
-    x_std = data_loader.x_std
-    pflow_mean = data_loader.pflow_mean
-    pflow_std = data_loader.pflow_std
 
 
 
