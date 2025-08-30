@@ -13,8 +13,6 @@ from torch_geometric.nn.conv import GATv2Conv
 from torch_geometric.typing import OptTensor
 from torch_geometric.utils import softmax
 
-
-
 class LipschitzNorm(nn.Module):
     """
     Scales pre-softmax logits e_ij per head to control sensitivity.
@@ -80,15 +78,7 @@ class GATv2ConvNorm(GATv2Conv):
         return alpha
 
 
-import torch
-import torch.nn as nn
-from torch.nn import Linear, LeakyReLU
-import torch_geometric.nn as nn_geo
-from typing import Optional
-
-# assumes GATv2ConvNorm and LipschitzNorm are already defined/imported
-
-class GAT_DSSE_NORM(nn.Module):
+class GAT_NORM_DSSE(nn.Module):
     def __init__(
         self,
         dim_feat: int,

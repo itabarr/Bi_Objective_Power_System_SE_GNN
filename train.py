@@ -7,7 +7,7 @@ from data._dsml_data import gsp_wls_edge, get_pflow
 
 from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
-from models_v2 import GAT_DSSE_NORM
+from models_v2 import GAT_NORM_DSSE
 
 from loss import WLSLoss, PhysicalLoss, CombinedWLSPhysicalLoss
 
@@ -66,7 +66,7 @@ model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
 
 
 # model_name = 'lipchitz_gat'
-# model = GAT_DSSE_NORM(dim_feat= hyperparameters['dim_nodes'],
+# model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
 #                 dim_dense=hyperparameters['dim_hid'],
 #                 dim_out=hyperparameters['dim_out'],
 #                 heads=hyperparameters['heads'],
