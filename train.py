@@ -9,14 +9,14 @@ from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
 from models_v2 import GAT_DSSE_NORM
 
-from loss import PhysicalAwareLoss, RegularizationLoss
+from loss import WLSLoss, PhysicalLoss, CombinedWLSPhysicalLoss
 
 from utils import get_device 
-from utils import angular_distance, angular_mae, angular_rmse
+from utils import angular_mae, angular_rmse
 import live_plot
 
 # Global CONFIG
-LIVE_PLOT = False
+LIVE_PLOT = True
 
 # GENERAL PARAMETERS
 phase_shift = True
@@ -57,21 +57,21 @@ hyperparameters = {
 }
 
 # model_name = 'gat'
-# model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
-#                 dim_dense=hyperparameters['dim_hid'],
-#                 dim_out=hyperparameters['dim_out'],
-#                 heads=hyperparameters['heads'],
-#                 num_layers=hyperparameters['gnn_layers'],
-#                 edge_dim=hyperparameters['dim_lines'])
-
-
-# model_name = 'lipchitz_gat'
-model = GAT_DSSE_NORM(dim_feat= hyperparameters['dim_nodes'],
+model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
                 dim_dense=hyperparameters['dim_hid'],
                 dim_out=hyperparameters['dim_out'],
                 heads=hyperparameters['heads'],
                 num_layers=hyperparameters['gnn_layers'],
                 edge_dim=hyperparameters['dim_lines'])
+
+
+# model_name = 'lipchitz_gat'
+# model = GAT_DSSE_NORM(dim_feat= hyperparameters['dim_nodes'],
+#                 dim_dense=hyperparameters['dim_hid'],
+#                 dim_out=hyperparameters['dim_out'],
+#                 heads=hyperparameters['heads'],
+#                 num_layers=hyperparameters['gnn_layers'],
+#                 edge_dim=hyperparameters['dim_lines'])
 
 # OPTIMIZER SETUP
 lr = 3e-3
@@ -79,19 +79,30 @@ optimizer = optim.Adamax(model.parameters(), lr=lr)
 
 
 # LOSS FUNCTION SETUP
+LAMBDA_WLS_VOLTAGE = 1e-8
+LAMBDA_WLS_PHASE = 1e-4
+LAMBDA_WLS_POWER_FLOW = 1e-8
 
-LAMBDA_VOLTAGE = 1e-4
-LAMBDA_PHASE = 1e-8
-LAMBDA_POWER_FLOW = 1e-6
-
-physical_loss = PhysicalAwareLoss(
-    lambda_voltage = LAMBDA_VOLTAGE,
-    lambda_phase = LAMBDA_PHASE,
-    lambda_power_flow = LAMBDA_POWER_FLOW,
+wls_loss = WLSLoss(
+    lambda_voltage=LAMBDA_WLS_VOLTAGE,
+    lambda_phase=LAMBDA_WLS_PHASE,
+    lambda_power_flow=LAMBDA_WLS_POWER_FLOW
 )
 
-LAMBDA_REGULARIZATION = 1e2
-regularization_loss = RegularizationLoss(LAMBDA_REGULARIZATION)
+LAMBDA_PHY_VOLTAGE = 1e-4
+LAMBDA_PHY_ANGLE = 1e-4
+LAMBDA_PHY_LOADING = 1e-4
+LAMBDA_REGULARIZATION = 1e-4
+physical_loss = PhysicalLoss(reg_weight=LAMBDA_REGULARIZATION)
+
+LAMBDA_WLS = 1e0
+LAMBDA_PHYSICAL = 1e0
+loss_fn = CombinedWLSPhysicalLoss(
+    wls_loss = wls_loss,
+    physical_loss = physical_loss ,
+    lambda_wls = LAMBDA_WLS ,
+    lambda_physical = LAMBDA_PHYSICAL
+)
 
 
 # METRICS TRACKING
@@ -151,12 +162,17 @@ for epoch in range(epochs):
             edge_index=data.edge_index,
             node_param=data.x[:, num_nfeat:],
             edge_param=data.edge_attr[:, num_efeat:]
-        )   
+        )
+
+        # _loss_cmp = gsp_wls_edge(input=data.x[:,:num_nfeat], edge_input=data.edge_attr[:,:num_efeat], output= out, x_mean=X_MEAN, x_std=X_STD, edge_mean = PFLOW_MEAN, edge_std = PFLOW_STD, edge_index=data.edge_index, reg_coefs = reg_coefs,num_samples=data.batch[-1]+1, node_param=data.x[:,num_nfeat:], edge_param = data.edge_attr[:,num_efeat:])
+        
         _loss.backward()
         optimizer.step()
         
+        # total_train_loss_cmp +=  _loss_cmp.item()
         total_train_loss += _loss.item()
     
+    # print(f"Loss: {_loss.item()} | Loss_cmp: {_loss_cmp.item()}")
     avg_train_loss = total_train_loss / num_batches
     train_losses.append(avg_train_loss)
     

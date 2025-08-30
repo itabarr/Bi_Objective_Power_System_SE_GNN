@@ -12,12 +12,9 @@ from torch_geometric.utils import scatter, get_laplacian
 from data._dsml_data import get_pflow, angular_distance
 
 
-class PhysicalAwareLoss(nn.Module):
+class WLSLoss(nn.Module):
     """
-    Physical-aware loss for power system state estimation using weighted least squares.
-
-    This class implements the measurement-based loss function that compares model predictions
-    with actual measurements using weighted least squares, incorporating power flow physics.
+    Weighted least squares loss for power system state estimation.
     """
 
     def __init__(self, lambda_voltage: float = 1e-4,
@@ -31,6 +28,8 @@ class PhysicalAwareLoss(nn.Module):
             "lam_phase": lambda_phase,
             "lam_power_flow": lambda_power_flow
         }
+        self.node_weights = torch.tensor([lambda_voltage, lambda_phase, lambda_power_flow, lambda_power_flow])
+        self.edge_weights = torch.tensor([lambda_power_flow, lambda_power_flow])
 
     def _denormalize_measurements(self, measurements: torch.Tensor, mean: torch.Tensor,
                             std: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -60,6 +59,32 @@ class PhysicalAwareLoss(nn.Module):
         return (node_measurements, node_covariances, edge_measurements, edge_covariances,
                 node_mask, edge_mask, cov_mask, edge_cov_mask)
 
+    def _compute_power_balance(self, p_from: torch.Tensor, q_from: torch.Tensor,
+                             p_to: torch.Tensor, q_to: torch.Tensor,
+                             edge_index: torch.Tensor, total_nodes: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute power balance at each node using power flows.
+
+        Args:
+            p_from, q_from: Active/reactive power flowing from source nodes
+            p_to, q_to: Active/reactive power flowing to target nodes
+            edge_index: Edge connectivity [2, num_edges]
+            total_nodes: Total number of nodes
+
+        Returns:
+            Tuple of (active_power_balance, reactive_power_balance)
+        """
+        indices_from = edge_index[0]
+        indices_to = edge_index[1]
+
+        # Sum flows at each node (negative signs follow PandaPower conventions)
+        p_balance = (-scatter(p_to, indices_to, dim_size=total_nodes) -
+                    scatter(p_from, indices_from, dim_size=total_nodes))
+        q_balance = (-scatter(q_to, indices_to, dim_size=total_nodes) -
+                    scatter(q_from, indices_from, dim_size=total_nodes))
+
+        return p_balance, q_balance
+
     def forward(self, input_data: torch.Tensor, edge_input: torch.Tensor,
                 output: torch.Tensor, x_mean: torch.Tensor, x_std: torch.Tensor,
                 edge_mean: torch.Tensor, edge_std: torch.Tensor,
@@ -87,7 +112,7 @@ class PhysicalAwareLoss(nn.Module):
         theta_angles *= (1.0 - node_param[:, 1:2])  # Enforce slack bus angle = 0
 
         # Compute power flows using physics model
-        (loading_lines, loading_trafos, p_from, q_from,
+        (_, _, p_from, q_from,
         p_to, q_to, _, _) = get_pflow(
             torch.cat([v_denorm, theta_angles], dim=1),
             edge_index, node_param, edge_param
@@ -117,14 +142,13 @@ class PhysicalAwareLoss(nn.Module):
 
         return J_measurements
 
-
-        
-class RegularizationLoss(nn.Module):
+    
+class PhysicalLoss(nn.Module):
     """
-    Regularization loss for enforcing physical constraints in power systems.
+    Physical-aware loss for power system state estimation using weighted least squares.
 
-    This class implements penalty terms for physical constraints such as voltage limits,
-    angle differences, and loading limits to ensure realistic power system operation.
+    This class implements the measurement-based loss function that compares model predictions
+    with actual measurements using weighted least squares, incorporating power flow physics.
     """
 
     def __init__(self, reg_weight: float = 1e2):
@@ -134,7 +158,7 @@ class RegularizationLoss(nn.Module):
         Args:
             reg_weight: Weight for all regularization terms
         """
-        super(RegularizationLoss, self).__init__()
+        super().__init__()
         self.reg_weight = reg_weight
 
     def forward(self, output: torch.Tensor, edge_index: torch.Tensor,
@@ -194,97 +218,23 @@ class RegularizationLoss(nn.Module):
     
 
 
-    def _compute_power_balance(self, p_from: torch.Tensor, q_from: torch.Tensor,
-                             p_to: torch.Tensor, q_to: torch.Tensor,
-                             edge_index: torch.Tensor, total_nodes: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Compute power balance at each node using power flows.
-
-        Args:
-            p_from, q_from: Active/reactive power flowing from source nodes
-            p_to, q_to: Active/reactive power flowing to target nodes
-            edge_index: Edge connectivity [2, num_edges]
-            total_nodes: Total number of nodes
-
-        Returns:
-            Tuple of (active_power_balance, reactive_power_balance)
-        """
-        indices_from = edge_index[0]
-        indices_to = edge_index[1]
-
-        # Sum flows at each node (negative signs follow PandaPower conventions)
-        p_balance = (-scatter(p_to, indices_to, dim_size=total_nodes) -
-                    scatter(p_from, indices_from, dim_size=total_nodes))
-        q_balance = (-scatter(q_to, indices_to, dim_size=total_nodes) -
-                    scatter(q_from, indices_from, dim_size=total_nodes))
-
-        return p_balance, q_balance
-
+class CombinedWLSPhysicalLoss(nn.Module):
+    def __init__(self, wls_loss: WLSLoss, physical_loss: PhysicalLoss , lambda_wls: float = 1.0, lambda_physical: float = 1.0):
+        super().__init__()
+        self.wls_loss = wls_loss
+        self.physical_loss = physical_loss
+        self.lambda_wls = lambda_wls
+        self.lambda_physical = lambda_physical
     
-
-
-# Convenience functions for backward compatibility
-def create_combined_loss(measurement_weights: Dict[str, float], reg_weight: float = 1e2):
-    """
-    Create both physical-aware and regularization loss functions.
-
-    Args:
-        measurement_weights: Dictionary with measurement weights
-        reg_weight: Regularization weight
-
-    Returns:
-        Tuple of (PhysicalAwareLoss, RegularizationLoss)
-    """
-    physical_loss = PhysicalAwareLoss(measurement_weights)
-    reg_loss = RegularizationLoss(reg_weight)
-    return physical_loss, reg_loss
-
-
-def gsp_wls_edge_refactored(input_data: torch.Tensor, edge_input: torch.Tensor,
-                           output: torch.Tensor, x_mean: torch.Tensor, x_std: torch.Tensor,
-                           edge_mean: torch.Tensor, edge_std: torch.Tensor,
-                           edge_index: torch.Tensor, reg_coefs: Dict[str, float],
-                           num_samples: int, node_param: torch.Tensor,
-                           edge_param: torch.Tensor) -> torch.Tensor:
-    """
-    Refactored version of gsp_wls_edge function with separated losses.
-
-    This function combines both physical-aware and regularization losses
-    for backward compatibility with the original interface.
-
-    Args:
-        input_data: Node input features (measurements and covariances)
-        edge_input: Edge input features (measurements and covariances)
-        output: Model predictions for node states
-        x_mean, x_std: Normalization parameters for node features
-        edge_mean, edge_std: Normalization parameters for edge features
-        edge_index: Edge connectivity tensor
-        reg_coefs: Dictionary of regularization coefficients
-        num_samples: Number of samples in batch
-        node_param: Node parameters
-        edge_param: Edge parameters
-
-    Returns:
-        Total combined loss (physical + regularization)
-    """
-    # Extract measurement weights
-    measurement_weights = {
-        'lam_v': reg_coefs['lam_v'],
-        'lam_p': reg_coefs['lam_p'],
-        'lam_pf': reg_coefs['lam_pf']
-    }
-
-    # Create loss functions
-    physical_loss_fn = PhysicalAwareLoss(measurement_weights)
-    reg_loss_fn = RegularizationLoss(reg_coefs['lam_reg'])
-
-    # Compute losses
-    physical_loss = physical_loss_fn(input_data, edge_input, output, x_mean, x_std,
-                                   edge_mean, edge_std, edge_index, node_param, edge_param)
-
-    reg_loss_dict = reg_loss_fn(output, edge_index, node_param, edge_param, x_mean, x_std)
-    reg_loss = reg_loss_dict['total']
-
-    return physical_loss + reg_loss
-
-
+    def forward(self, input_data: torch.Tensor, edge_input: torch.Tensor,
+                output: torch.Tensor, x_mean: torch.Tensor, x_std: torch.Tensor,
+                edge_mean: torch.Tensor, edge_std: torch.Tensor,
+                edge_index: torch.Tensor, node_param: torch.Tensor,
+                edge_param: torch.Tensor) -> torch.Tensor:
+        
+        wls_loss = self.wls_loss(input_data, edge_input, output, x_mean, x_std,
+                                edge_mean, edge_std, edge_index, node_param, edge_param)
+        
+        physical_loss = self.physical_loss(output, edge_index, node_param, edge_param, x_mean, x_std)
+        
+        return self.lambda_wls * wls_loss + self.lambda_physical * physical_loss['total']
