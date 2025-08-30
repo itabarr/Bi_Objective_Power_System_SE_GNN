@@ -3,25 +3,15 @@ import torch.nn.functional as F
 from torchmetrics.regression import MeanAbsoluteError
 import torch.optim as optim
 
-from data._dsml_data import gsp_wls_edge, get_pflow, angular_distance
+from data._dsml_data import gsp_wls_edge, get_pflow
 
 from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
 from models_v2 import GAT_DSSE_NORM
-from utils import get_device
+from utils import get_device 
+from utils import angular_distance, angular_mae, angular_rmse
 import live_plot
 
-
-
-def angular_mae(pred_angles, true_angles):
-    """Calculate Mean Absolute Error for angles with proper wrapping."""
-    diff = angular_distance(pred_angles, true_angles)
-    return torch.mean(torch.abs(diff))
-
-def angular_rmse(pred_angles, true_angles):
-    """Calculate Root Mean Square Error for angles with proper wrapping."""
-    diff = angular_distance(pred_angles, true_angles)
-    return torch.sqrt(torch.mean(diff**2))
 
 # GENERAL PARAMETERS
 phase_shift = True
@@ -117,8 +107,8 @@ model = model.to(device)
 
 metrics_list = [
             {'Train Loss': -1},
-            {'MAE V': -1},
-            {'MAE Theta': -1}, 
+            {'RMSE V': -1},
+            {'RMSE Theta': -1}, 
         ]
 
 live_plot.init_live_plot(metrics_list)
@@ -263,12 +253,12 @@ for epoch in range(epochs):
         
 
         # Print training progress every 10 epochs
-        print(f"Epoch {epoch + 1}/{epochs} - Train Loss: {avg_train_loss:.6f} | MAE V: {mae_v:.6f} | MAE Theta: {mae_th:.6f}")
+        print(f"Epoch {epoch + 1}/{epochs} - Train Loss: {avg_train_loss:.6f} | RMSE V: {rmse_v:.6f} | RMSE Theta: {rmse_th:.6f}")
         
         metrics_list = [
             {'Train Loss': avg_train_loss},
-            {'MAE V': mae_v},
-            {'MAE Theta': mae_th}, 
+            {'RMSE V': rmse_v},
+            {'RMSE Theta': rmse_th}, 
         ]
         live_plot.update_live_plot(epoch = epoch, metrics_list = metrics_list)
         

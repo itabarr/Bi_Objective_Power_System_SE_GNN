@@ -74,14 +74,21 @@ def update_live_plot(epoch, metrics_list):
         for label, value in metrics.items():
             history[subplot_idx][label].append(value)
     
-    # Update plots with raw values
-    for ax, subplot_lines, hist in zip(axs, lines, history):
-        for label, values in hist.items():
-            values = np.array(values)
-            subplot_lines[label].set_data(epochs_hist, values)
-        
-        ax.relim()               # Recalculate limits
-        ax.autoscale_view(True, True, True)  # Autoscale both axes
+    # Update plots with raw values (skip first 50 epochs)
+    skip_epochs = 50
+
+    # Only update plots if we have more than skip_epochs
+    if len(epochs_hist) > skip_epochs:
+        display_epochs = epochs_hist[skip_epochs:]
+
+        for ax, subplot_lines, hist in zip(axs, lines, history):
+            for label, values in hist.items():
+                values = np.array(values)
+                display_values = values[skip_epochs:]  # Skip first 50 values
+                subplot_lines[label].set_data(display_epochs, display_values)
+
+            ax.relim()               # Recalculate limits
+            ax.autoscale_view(True, True, True)  # Autoscale both axes
     
     fig.canvas.draw()
     fig.canvas.flush_events()
