@@ -6,8 +6,8 @@ import torch.optim as optim
 from data._dsml_data import gsp_wls_edge, get_pflow, angular_distance
 
 from data_processing import PowerSystemDataLoader
-from ref_models import GAT_DSSE
-from models import DeepGAT_DSSE
+from models_ref import GAT_DSSE
+from models_v2 import GAT_DSSE_NORM
 from utils import get_device
 import live_plot
 
@@ -71,14 +71,12 @@ model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
 
 
 # model_name = 'lipchitz_gat'
-# model = DeepGAT_DSSE(dim_feat=hyperparameters['dim_nodes'],
-#                     dim_dense=hyperparameters['dim_hid'],
-#                     dim_out=hyperparameters['dim_out'],
-#                     heads=hyperparameters['heads'],
-#                     num_layers=hyperparameters['gnn_layers'],
-#                     edge_dim=hyperparameters['dim_lines'],
-#                     norm=hyperparameters['norm'],
-#                     dropout=hyperparameters['dropout_rate'])
+model = GAT_DSSE_NORM(dim_feat= hyperparameters['dim_nodes'],
+                dim_dense=hyperparameters['dim_hid'],
+                dim_out=hyperparameters['dim_out'],
+                heads=hyperparameters['heads'],
+                num_layers=hyperparameters['gnn_layers'],
+                edge_dim=hyperparameters['dim_lines'])
 
 # Generate the optimizers.
 lr = 3e-3
