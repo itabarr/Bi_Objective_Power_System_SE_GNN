@@ -2,7 +2,9 @@ import torch.nn as nn
 import torch
 from torch.nn import functional as F
 from torch.optim.lr_scheduler import ExponentialLR
-from models_v2 import GAT_NORM_DSSE
+
+from loss import PhysicalLoss , WLSLoss
+from models_GAT_NORM_DSSE import GAT_NORM_DSSE
 
 class ConstraintLoss(nn.Module):
     def __init__(self, n_class=2, alpha=1, p_norm=2):
@@ -73,7 +75,7 @@ class DemographicParityLoss(ConstraintLoss):
         return super(DemographicParityLoss, self).forward(X, out, sensitive)
 
 
-class FairGNN_DSSE(nn.Module):
+class FAIR_GAT_NORM_DSSE(nn.Module):
     """
     Fair Graph Neural Network for Distribution System State Estimation.
 
@@ -88,10 +90,10 @@ class FairGNN_DSSE(nn.Module):
                  sensitive_classes=[0, 1], lr_g: float = 1e-3, lr_f: float = 1e-9,
                  weight_decay: float = 1e-5):
 
-        super(FairGNN_DSSE, self).__init__()
+        super(FAIR_GAT_NORM_DSSE, self).__init__()
 
         # Main GNN backbone
-        self.GNN = GAT_NORM_DSSE(
+        self.model = GAT_NORM_DSSE(
             dim_feat=dim_feat,
             dim_dense=dim_dense,
             dim_out=dim_dense,  # Output hidden features for fairness processing
@@ -116,12 +118,8 @@ class FairGNN_DSSE(nn.Module):
         self.classifier = nn.Linear(dim_dense, dim_out)
 
         # Loss functions
-        self.criterion = nn.MSELoss()  # For regression (state estimation)
-        self.criterion_fairness = DemographicParityLoss(
-            sensitive_classes=sensitive_classes,
-            alpha=fairness_alpha,
-            p_norm=2
-        )
+        self.criterion = WLSLoss()
+        self.criterion_fairness = PhysicalLoss()
 
         # Optimizers for adversarial training
         G_params = list(self.GNN.parameters()) + list(self.classifier.parameters())
@@ -149,7 +147,7 @@ class FairGNN_DSSE(nn.Module):
         Returns:
             Tuple of (predictions, hidden_features)
         """
-        z = self.GNN(x, edge_index, edge_attr)
+        z = self.model(x, edge_index, edge_attr)
         z = self.fairness_layer(z)
         y = self.classifier(z)
         return y, z
@@ -177,7 +175,7 @@ class FairGNN_DSSE(nn.Module):
 
         # Step 1: Optimize fairness layer (adversarial)
         self.optimizer_F.zero_grad()
-        z = self.GNN(x, edge_index, edge_attr)
+        z = self.model(x, edge_index, edge_attr)
         z = self.fairness_layer(z)
         y = self.classifier(z)
 
@@ -190,7 +188,7 @@ class FairGNN_DSSE(nn.Module):
 
         # Step 2: Optimize GNN and classifier (main task + fairness constraint)
         self.optimizer_G.zero_grad()
-        z = self.GNN(x, edge_index, edge_attr)
+        z = self.model(x, edge_index, edge_attr)
         z = self.fairness_layer(z)
         y = self.classifier(z)
 

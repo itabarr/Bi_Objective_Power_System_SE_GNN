@@ -7,7 +7,7 @@ from data._dsml_data import gsp_wls_edge, get_pflow
 
 from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
-from models_v2 import GAT_NORM_DSSE
+from models_GAT_NORM_DSSE import GAT_NORM_DSSE
 
 from loss import WLSLoss, PhysicalLoss, CombinedWLSPhysicalLoss
 
@@ -34,6 +34,8 @@ split_coef = 0.9
 
 data_loader = PowerSystemDataLoader(case='cigre14', batch_size=64, split_coef=0.9)
 train_loader, test_loader = data_loader.setup_complete_pipeline()
+
+
 
 X_MEAN = data_loader.x_mean
 X_STD = data_loader.x_std
