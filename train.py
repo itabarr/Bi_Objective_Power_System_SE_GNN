@@ -8,10 +8,15 @@ from data._dsml_data import gsp_wls_edge, get_pflow
 from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
 from models_v2 import GAT_DSSE_NORM
+
+from loss import PowerSystemLoss
+
 from utils import get_device 
 from utils import angular_distance, angular_mae, angular_rmse
 import live_plot
 
+# Global CONFIG
+LIVE_PLOT = False
 
 # GENERAL PARAMETERS
 phase_shift = True
@@ -51,13 +56,13 @@ hyperparameters = {
     'norm': 'lipschitznorm'
 }
 
-model_name = 'gat'
-model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
-                dim_dense=hyperparameters['dim_hid'],
-                dim_out=hyperparameters['dim_out'],
-                heads=hyperparameters['heads'],
-                num_layers=hyperparameters['gnn_layers'],
-                edge_dim=hyperparameters['dim_lines'])
+# model_name = 'gat'
+# model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
+#                 dim_dense=hyperparameters['dim_hid'],
+#                 dim_out=hyperparameters['dim_out'],
+#                 heads=hyperparameters['heads'],
+#                 num_layers=hyperparameters['gnn_layers'],
+#                 edge_dim=hyperparameters['dim_lines'])
 
 
 # model_name = 'lipchitz_gat'
@@ -68,12 +73,12 @@ model = GAT_DSSE_NORM(dim_feat= hyperparameters['dim_nodes'],
                 num_layers=hyperparameters['gnn_layers'],
                 edge_dim=hyperparameters['dim_lines'])
 
-# Generate the optimizers.
+# OPTIMIZER SETUP
 lr = 3e-3
-optimizer = getattr(optim, 'Adamax')(model.parameters(), lr=lr)
+optimizer = optim.Adamax(model.parameters(), lr=lr)
 
 
-# coefficients for training loss, to tune to find good training conditions/balance
+# LOSS FUNCTION SETUP
 mu_v = 1e-1
 reg_coefs = {
 'mu_v': mu_v,
@@ -83,13 +88,13 @@ reg_coefs = {
 'lam_pf': 1e-6,
 'lam_reg': 1e2
 }
+loss_fn = PowerSystemLoss(reg_coefs)
 
+
+# METRICS TRACKING
 train_list = []
 thresh = 0
-
-# Initialize lists for training and testing metrics
 train_losses = []
-
 rmse_v_list = []
 mae_v_list = []
 rmse_th_list = []
@@ -111,7 +116,8 @@ metrics_list = [
             {'RMSE Theta': -1}, 
         ]
 
-live_plot.init_live_plot(metrics_list)
+if LIVE_PLOT:
+    live_plot.init_live_plot(metrics_list)
 
 epochs = 1000
 for epoch in range(epochs):
@@ -131,25 +137,22 @@ for epoch in range(epochs):
             data.edge_attr[:, :num_efeat]
         )
         
-        loss = gsp_wls_edge(
-            input=data.x[:, :num_nfeat],
+        _loss = loss_fn(
+            input_data=data.x[:, :num_nfeat],
             edge_input=data.edge_attr[:, :num_efeat],
             output=out,
             x_mean=X_MEAN,
-            x_std=X_STD,
+            x_std=X_STD,    
             edge_mean=PFLOW_MEAN,
             edge_std=PFLOW_STD,
             edge_index=data.edge_index,
-            reg_coefs=reg_coefs,
-            num_samples=data.batch[-1] + 1,
             node_param=data.x[:, num_nfeat:],
             edge_param=data.edge_attr[:, num_efeat:]
-        )
-        
-        loss.backward()
+        )   
+        _loss.backward()
         optimizer.step()
         
-        total_train_loss += loss.item()
+        total_train_loss += _loss.item()
     
     avg_train_loss = total_train_loss / num_batches
     train_losses.append(avg_train_loss)
@@ -260,9 +263,12 @@ for epoch in range(epochs):
             {'RMSE V': rmse_v},
             {'RMSE Theta': rmse_th}, 
         ]
-        live_plot.update_live_plot(epoch = epoch, metrics_list = metrics_list)
-        
-live_plot.finalize_live_plot()
+
+        if LIVE_PLOT:
+            live_plot.update_live_plot(epoch = epoch, metrics_list = metrics_list)
+
+if LIVE_PLOT:
+    live_plot.finalize_live_plot()
 
 
     
