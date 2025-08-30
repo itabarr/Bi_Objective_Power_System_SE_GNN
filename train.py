@@ -9,7 +9,7 @@ from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
 from models_v2 import GAT_DSSE_NORM
 
-from loss import PowerSystemLoss
+from loss import PhysicalAwareLoss, RegularizationLoss
 
 from utils import get_device 
 from utils import angular_distance, angular_mae, angular_rmse
@@ -79,16 +79,19 @@ optimizer = optim.Adamax(model.parameters(), lr=lr)
 
 
 # LOSS FUNCTION SETUP
-mu_v = 1e-1
-reg_coefs = {
-'mu_v': mu_v,
-'mu_theta': mu_v,
-'lam_v': 1e-4,
-'lam_p': 1e-8,
-'lam_pf': 1e-6,
-'lam_reg': 1e2
-}
-loss_fn = PowerSystemLoss(reg_coefs)
+
+LAMBDA_VOLTAGE = 1e-4
+LAMBDA_PHASE = 1e-8
+LAMBDA_POWER_FLOW = 1e-6
+
+physical_loss = PhysicalAwareLoss(
+    lambda_voltage = LAMBDA_VOLTAGE,
+    lambda_phase = LAMBDA_PHASE,
+    lambda_power_flow = LAMBDA_POWER_FLOW,
+)
+
+LAMBDA_REGULARIZATION = 1e2
+regularization_loss = RegularizationLoss(LAMBDA_REGULARIZATION)
 
 
 # METRICS TRACKING
