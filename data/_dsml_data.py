@@ -287,7 +287,6 @@ def data_from_pickles(folder, num_nfeat, num_efeat, num_nmeas, num_emeas, meas_v
         edge_attr_set = edge_attr_set[num_lines:]
         
     return data_list, x_set_mean[:num_nfeat], x_set_std[:num_nfeat], edge_attr_set_mean[:num_efeat], edge_attr_set_std[:num_efeat]
-
     
 def get_pflow(y, edge_index, node_param, edge_param, phase_shift=True):
     """
