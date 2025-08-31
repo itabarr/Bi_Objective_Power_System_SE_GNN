@@ -5,7 +5,7 @@ import torch.optim as optim
 
 from data._dsml_data import gsp_wls_edge, get_pflow
 
-from data.data_processing import PowerSystemDataLoader
+from data.power_system_dataloader import PowerSystemDataLoader
 
 from models.models_ref import GAT_DSSE
 from models.models_GAT_V2_CONV_NORM_DSSE import GAT_NORM_DSSE

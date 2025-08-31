@@ -5,11 +5,12 @@ import torch.optim as optim
 
 from data._dsml_data import gsp_wls_edge, get_pflow
 
-from data_processing import PowerSystemDataLoader
-from models_ref import GAT_DSSE
+from data.power_system_dataset import PowerSystemDataset
+from data.power_system_dataloader import PowerSystemDataLoader
 
-from models_GAT_CONV_NORM_DSSE import DeepGAT_DSSE
-from models_GAT_V2_CONV_NORM_DSSE import GAT_NORM_DSSE
+from models.models_ref import GAT_DSSE
+from models.models_GAT_CONV_NORM_DSSE import DeepGAT_DSSE
+from models.models_GAT_V2_CONV_NORM_DSSE import GAT_NORM_DSSE
 
 from loss import WLSLoss, PhysicalLoss, CombinedWLSPhysicalLoss
 
@@ -17,46 +18,48 @@ from utils import get_device
 from utils import angular_mae, angular_rmse
 import live_plot
 
-# Global CONFIG
+# GLOBAL CONFIG
 LIVE_PLOT = True
+DEVICE = get_device()
 
-# GENERAL PARAMETERS
-phase_shift = True
-num_nfeat = 8
-num_efeat = 6
-num_nmeas = 4
-num_emeas = 2
-device = get_device()
+# PROBLEM DIMENSIONS
+NUM_NODE_FEATURES = 8       # V, V_cov, Theta, Theta_cov, P, P_cov, Q, Q_cov
+NUM_EDGE_FEATURES = 6       # PF, PF_cov, QF, QF_cov, B, G
+NUM_OUTPUT_FEATURES = 2     # V, Theta
 
-# DATA LOADING
+# MEASUREMENTS PENETRATION
+NUM_NODE_MEASUREMENTS = 4   
+NUM_EDGE_MEASUREMENTS = 2
 
-case = 'cigre14'
-batch_size = 64
-split_coef = 0.9
+# DATA PREPARATION
+CASE = 'cigre14'
+BATCH_SIZE = 64
+SPLIT_COEF = 0.9
 
-data_loader = PowerSystemDataLoader(case='cigre14', batch_size=64, split_coef=0.9)
-train_loader, test_loader = data_loader.setup_complete_pipeline()
+power_system_dataset = PowerSystemDataset(case = CASE , num_node_features = NUM_NODE_FEATURES, num_edge_features = NUM_EDGE_FEATURES,
+                                         num_node_measurements = NUM_NODE_MEASUREMENTS, num_edge_measurements = NUM_EDGE_MEASUREMENTS)
+print(power_system_dataset)
 
+test_dataset , train_dataset = power_system_dataset.split_dataset(split_coef = SPLIT_COEF)
 
-X_MEAN = data_loader.x_mean
-X_STD = data_loader.x_std
-PFLOW_MEAN = data_loader.pflow_mean
-PFLOW_STD = data_loader.pflow_std
+X_MEAN = power_system_dataset._x_mean
+X_STD = power_system_dataset._x_std
+PFLOW_MEAN = power_system_dataset._edge_features_mean
+PFLOW_STD = power_system_dataset._edge_features_std
+
+test_loader = PowerSystemDataLoader(test_dataset, batch_size = BATCH_SIZE, shuffle = True)
+train_loader = PowerSystemDataLoader(train_dataset, batch_size = BATCH_SIZE, shuffle = False)
 
 # MODEL SETUP
 
 # dim_hid, gnn_layers, heads, K, dropout and L to tune as wanted
 hyperparameters = {
-    'dim_nodes': 8, # V, Theta, P, Q and Covs
-    'dim_lines': 6, # P, Q and their Cov,B,G
-    'dim_out': 2, # V, Theta
+    'dim_nodes': NUM_NODE_FEATURES, 
+    'dim_lines': NUM_EDGE_FEATURES, 
+    'dim_out':   NUM_OUTPUT_FEATURES,                   
     'dim_hid': 32, 
     'gnn_layers': 8,
     'heads': 1,
-    'K': 2,
-    'dropout_rate': 0.3,
-    'L': 5,
-    'norm': 'lipschitznorm'
 }
 
 # model_name = 'gat'
@@ -87,9 +90,9 @@ model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
     
 
 # OPTIMIZER SETUP
-lr = 3e-3
-optimizer = optim.Adamax(model.parameters(), lr=lr)
-
+LR = 3e-3
+WEIGHT_DECAY = 1e-5
+optimizer = optim.Adamax(model.parameters(), lr = LR , weight_decay = WEIGHT_DECAY)
 
 # LOSS FUNCTION SETUP
 LAMBDA_WLS_VOLTAGE = 1e-8
@@ -144,7 +147,7 @@ prop_std_th_list = []
 
 
 # TRAINING LOOP
-model = model.to(device) 
+model = model.to(DEVICE) 
 
 metrics_list = [
             {'Train Loss': -1},
@@ -163,30 +166,43 @@ for epoch in range(epochs):
     num_batches = len(train_loader)
     
     for data in train_loader:
-        data = data.to(device)  # Move data to device
+        data = data.to(DEVICE)  # Move data to device
         
         optimizer.zero_grad()
         
         out = model(
-            data.x[:, :num_nfeat],
+            data.x,
             data.edge_index,
-            data.edge_attr[:, :num_efeat]
+            data.edge_attr
         )
         
-        # _loss = loss_fn(
-        #     input_data=data.x[:, :num_nfeat],
-        #     edge_input=data.edge_attr[:, :num_efeat],
-        #     output=out,
-        #     x_mean=X_MEAN,
-        #     x_std=X_STD,    
-        #     edge_mean=PFLOW_MEAN,
-        #     edge_std=PFLOW_STD,
-        #     edge_index=data.edge_index,
-        #     node_param=data.x[:, num_nfeat:],
-        #     edge_param=data.edge_attr[:, num_efeat:]
-        # )
+        _loss = loss_fn(
+            input_data=data.x[:, :NUM_NODE_FEATURES],
+            edge_input=data.edge_attr[:, :NUM_EDGE_FEATURES],
+            output=out,
+            x_mean=X_MEAN,
+            x_std=X_STD,    
+            edge_mean=PFLOW_MEAN,
+            edge_std=PFLOW_STD,
+            edge_index=data.edge_index,
+            node_param=data.x[:, NUM_NODE_FEATURES:],
+            edge_param=data.edge_attr[:, NUM_EDGE_FEATURES:]
+        )
 
-        _loss = gsp_wls_edge(input=data.x[:,:num_nfeat], edge_input=data.edge_attr[:,:num_efeat], output= out, x_mean=X_MEAN, x_std=X_STD, edge_mean = PFLOW_MEAN, edge_std = PFLOW_STD, edge_index=data.edge_index, reg_coefs = reg_coefs,num_samples= data.batch[-1]+1, node_param=data.x[:,num_nfeat:], edge_param = data.edge_attr[:,num_efeat:])
+        # _loss = gsp_wls_edge(
+        #     input = data.x,
+        #     edge_input= data.edge_attr[:,:],
+        #     output= out,
+        #     x_mean= X_MEAN,
+        #     x_std = X_STD,
+        #     edge_mean = PFLOW_MEAN,
+        #     edge_std = PFLOW_STD,
+        #     edge_index = data.edge_index[:,:],
+        #     reg_coefs = reg_coefs,
+        #     num_samples = BATCH_SIZE,
+        #     node_param = data.x,
+        #     edge_param = data.edge_attr
+        # )
         
         _loss.backward()
         optimizer.step()
@@ -216,15 +232,15 @@ for epoch in range(epochs):
         
         num_test_batches = len(test_loader)
         
-        mae = MeanAbsoluteError().to(device)
+        mae = MeanAbsoluteError().to(DEVICE)
         
         for data in test_loader:
-            data = data.to(device)  # Move data to device
+            data = data.to(DEVICE)  # Move data to device
             
             out = model(
-                data.x[:, :num_nfeat],
+                data.x,
                 data.edge_index,
-                data.edge_attr[:, :num_efeat]
+                data.edge_attr
             )
             out = torch.cat([out[:, 0:1] * X_STD[:1] + X_MEAN[:1], out[:, 1:]], dim=1)
             out[:, 1:] *= (1. - data.x[:, 9:10])
@@ -241,15 +257,15 @@ for epoch in range(epochs):
             true_loading_lines, true_loading_trafos = get_pflow(
                 data.y,
                 data.edge_index,
-                node_param=data.x[:, num_nfeat:],
-                edge_param=data.edge_attr[:, num_efeat:]
+                node_param=data.x[:, NUM_NODE_FEATURES:],
+                edge_param=data.edge_attr[:, NUM_EDGE_FEATURES:]
             )[:2]
             
             out_loading_lines, out_loading_trafos = get_pflow(
                 out,
                 data.edge_index,
-                node_param=data.x[:, num_nfeat:],
-                edge_param=data.edge_attr[:, num_efeat:]
+                node_param=data.x[:, NUM_NODE_FEATURES:],
+                edge_param=data.edge_attr[:, NUM_EDGE_FEATURES:]
             )[:2]
             
             # Filter non-zero for lines

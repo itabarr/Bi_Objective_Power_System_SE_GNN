@@ -86,6 +86,15 @@ class PowerSystemDataset(Dataset):
                 self.meas_v,
                 self.meas_pflow
             )
+            
+            # keep only nfeat and ne features in x
+
+            self._all_data = dataset
+            
+            for data in dataset:
+                data.x = data.x[:, :self._num_node_features]
+                data.edge_attr = data.edge_attr[:, :self._num_edge_features]
+                
 
             self._data = dataset
             self._x_features_names = [
@@ -141,6 +150,32 @@ class PowerSystemDataset(Dataset):
     def len(self) -> int:
         """Get the number of samples in the dataset."""
         return len(self._data)
+
+    def get(self, idx: int) -> Data:
+        """Get a single data sample by index."""
+        if idx >= len(self._data):
+            raise IndexError(f"Index {idx} out of range for dataset of size {len(self._data)}")
+        return self._data[idx]
+
+    def split_dataset(self, split_coef: float = 0.9) -> Tuple['PowerSystemDataset', 'PowerSystemDataset']:
+        """
+        Split the dataset into test and train datasets.
+
+        Args:
+            split_coef: Coefficient for train/test split (train ratio)
+
+        Returns:
+            Tuple of (test_dataset, train_dataset)
+        """
+        # Split the dataset
+        data_list = self._data.copy()
+        random.shuffle(data_list)
+
+        split_idx = int(split_coef * len(data_list))
+        train_dataset = data_list[:split_idx]
+        test_dataset = data_list[split_idx:]
+        
+        return test_dataset, train_dataset
     
     def __repr__(self) -> str:
         """String representation of the dataset."""
@@ -158,7 +193,7 @@ class PowerSystemDataset(Dataset):
         _str = _str + f"\nNumber of edges per graph: {number_of_edges_per_graph}"
 
         # Node features
-        nodes_features_names = self._x_features_names
+        nodes_features_names = self._x_features_names[:self._num_node_features]
         nodes_features_len = self._data[0].x.shape[1]
         _str = _str + f"\n\nNumber of node features: {nodes_features_len}"
         df = pd.DataFrame(columns=['Feature', 'Unit'])
@@ -171,7 +206,7 @@ class PowerSystemDataset(Dataset):
         _str = _str + f"\n{df.to_markdown()}"
         
         # Edge features
-        edge_features_names = self._edge_features_names
+        edge_features_names = self._edge_features_names[:self._num_edge_features]
         edge_features_len = self._data[0].edge_attr.shape[1]
         _str = _str + f"\n\nNumber of edge features: {edge_features_len}\n"
         df = pd.DataFrame(columns=['Feature', 'Unit'])
@@ -224,7 +259,6 @@ class PowerSystemDataset(Dataset):
         _str += f"\n{df.to_markdown()}"
         
         return _str
-
 
 
 if __name__ == "__main__":
