@@ -217,7 +217,6 @@ class PhysicalLoss(nn.Module):
         }
     
 
-
 class CombinedWLSPhysicalLoss(nn.Module):
     def __init__(self, wls_loss: WLSLoss, physical_loss: PhysicalLoss , lambda_wls: float = 1.0, lambda_physical: float = 1.0):
         super().__init__()

@@ -170,7 +170,6 @@ class PowerSystemDataset(Dataset):
         df.index.name = 'Index'
         _str = _str + f"\n{df.to_markdown()}"
         
-
         # Edge features
         edge_features_names = self._edge_features_names
         edge_features_len = self._data[0].edge_attr.shape[1]

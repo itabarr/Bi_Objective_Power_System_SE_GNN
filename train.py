@@ -7,7 +7,9 @@ from data._dsml_data import gsp_wls_edge, get_pflow
 
 from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
-from models_GAT_NORM_DSSE import GAT_NORM_DSSE
+
+from models_GAT_CONV_NORM_DSSE import DeepGAT_DSSE
+from models_GAT_V2_CONV_NORM_DSSE import GAT_NORM_DSSE
 
 from loss import WLSLoss, PhysicalLoss, CombinedWLSPhysicalLoss
 
@@ -36,7 +38,6 @@ data_loader = PowerSystemDataLoader(case='cigre14', batch_size=64, split_coef=0.
 train_loader, test_loader = data_loader.setup_complete_pipeline()
 
 
-
 X_MEAN = data_loader.x_mean
 X_STD = data_loader.x_std
 PFLOW_MEAN = data_loader.pflow_mean
@@ -59,21 +60,31 @@ hyperparameters = {
 }
 
 # model_name = 'gat'
-model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
+# model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
+#                 dim_dense=hyperparameters['dim_hid'],
+#                 dim_out=hyperparameters['dim_out'],
+#                 heads=hyperparameters['heads'],
+#                 num_layers=hyperparameters['gnn_layers'],
+#                 edge_dim=hyperparameters['dim_lines'])
+
+
+# model_name = 'lipchitz_gat'
+model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
                 dim_dense=hyperparameters['dim_hid'],
                 dim_out=hyperparameters['dim_out'],
                 heads=hyperparameters['heads'],
                 num_layers=hyperparameters['gnn_layers'],
                 edge_dim=hyperparameters['dim_lines'])
 
-
-# model_name = 'lipchitz_gat'
-# model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
-#                 dim_dense=hyperparameters['dim_hid'],
-#                 dim_out=hyperparameters['dim_out'],
-#                 heads=hyperparameters['heads'],
-#                 num_layers=hyperparameters['gnn_layers'],
-#                 edge_dim=hyperparameters['dim_lines'])
+# model = DeepGAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
+#                     dim_dense=hyperparameters['dim_hid'],
+#                     dim_out=hyperparameters['dim_out'],
+#                     heads=hyperparameters['heads'],
+#                     num_layers=hyperparameters['gnn_layers'],
+#                     edge_dim=hyperparameters['dim_lines'],
+#                     norm=hyperparameters['norm'],
+#                     dropout=hyperparameters['dropout_rate'])
+    
 
 # OPTIMIZER SETUP
 lr = 3e-3
@@ -106,6 +117,15 @@ loss_fn = CombinedWLSPhysicalLoss(
     lambda_physical = LAMBDA_PHYSICAL
 )
 
+mu_v = 1e-1
+reg_coefs = {
+'mu_v': mu_v,
+'mu_theta': mu_v,
+'lam_v': 1e-4,
+'lam_p': 1e-8,
+'lam_pf': 1e-6,
+'lam_reg': 1e2
+}
 
 # METRICS TRACKING
 train_list = []
@@ -153,20 +173,20 @@ for epoch in range(epochs):
             data.edge_attr[:, :num_efeat]
         )
         
-        _loss = loss_fn(
-            input_data=data.x[:, :num_nfeat],
-            edge_input=data.edge_attr[:, :num_efeat],
-            output=out,
-            x_mean=X_MEAN,
-            x_std=X_STD,    
-            edge_mean=PFLOW_MEAN,
-            edge_std=PFLOW_STD,
-            edge_index=data.edge_index,
-            node_param=data.x[:, num_nfeat:],
-            edge_param=data.edge_attr[:, num_efeat:]
-        )
+        # _loss = loss_fn(
+        #     input_data=data.x[:, :num_nfeat],
+        #     edge_input=data.edge_attr[:, :num_efeat],
+        #     output=out,
+        #     x_mean=X_MEAN,
+        #     x_std=X_STD,    
+        #     edge_mean=PFLOW_MEAN,
+        #     edge_std=PFLOW_STD,
+        #     edge_index=data.edge_index,
+        #     node_param=data.x[:, num_nfeat:],
+        #     edge_param=data.edge_attr[:, num_efeat:]
+        # )
 
-        # _loss_cmp = gsp_wls_edge(input=data.x[:,:num_nfeat], edge_input=data.edge_attr[:,:num_efeat], output= out, x_mean=X_MEAN, x_std=X_STD, edge_mean = PFLOW_MEAN, edge_std = PFLOW_STD, edge_index=data.edge_index, reg_coefs = reg_coefs,num_samples=data.batch[-1]+1, node_param=data.x[:,num_nfeat:], edge_param = data.edge_attr[:,num_efeat:])
+        _loss = gsp_wls_edge(input=data.x[:,:num_nfeat], edge_input=data.edge_attr[:,:num_efeat], output= out, x_mean=X_MEAN, x_std=X_STD, edge_mean = PFLOW_MEAN, edge_std = PFLOW_STD, edge_index=data.edge_index, reg_coefs = reg_coefs,num_samples= data.batch[-1]+1, node_param=data.x[:,num_nfeat:], edge_param = data.edge_attr[:,num_efeat:])
         
         _loss.backward()
         optimizer.step()
@@ -277,7 +297,13 @@ for epoch in range(epochs):
         
 
         # Print training progress every 10 epochs
-        print(f"Epoch {epoch + 1}/{epochs} - Train Loss: {avg_train_loss:.6f} | RMSE V: {rmse_v:.6f} | RMSE Theta: {rmse_th:.6f}")
+        # print(f"Epoch {epoch + 1}/{epochs} - Train Loss: {avg_train_loss:.6f} | RMSE V: {rmse_v:.6f} | RMSE Theta: {rmse_th:.6f}")
+
+        # full metrics (+std)
+        print(f"Epoch {epoch + 1}/{epochs} - Train Loss: {avg_train_loss:.6f} | RMSE V: {rmse_v:.6f} | RMSE Theta: {rmse_th:.6f} | RMSE Loading: {rmse_loading:.6f} | RMSE Loading Transformers: {rmse_loading_trafos:.6f}")
+        print(f"MAE V: {mae_v:.6f} | MAE Theta: {mae_th:.6f} | MAE Loading: {mae_loading:.6f} | MAE Loading Transformers: {mae_loading_trafos:.6f}")
+        print(f"Prop Std V: {prop_std_v:.6f} | Prop Std Theta: {prop_std_th:.6f}")
+
         
         metrics_list = [
             {'Train Loss': avg_train_loss},

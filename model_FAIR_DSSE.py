@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from torch.optim.lr_scheduler import ExponentialLR
 
 from loss import PhysicalLoss , WLSLoss
-from models_GAT_NORM_DSSE import GAT_NORM_DSSE
+from models_GAT_V2_CONV_NORM_DSSE import GAT_NORM_DSSE
 
 class ConstraintLoss(nn.Module):
     def __init__(self, n_class=2, alpha=1, p_norm=2):
