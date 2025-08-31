@@ -18,8 +18,8 @@ LIVE_PLOT = True
 phase_shift = True
 num_nfeat = 8
 num_efeat = 6
-num_nmeas = 4 # TODO: Understand why this is not in use for 
-num_emeas = 2 # TODO: Understand why this is not in use for 
+num_nmeas = 4 # TODO: Understand why this is not in use
+num_emeas = 2 # TODO: Understand why this is not in use 
 device = get_device()
 
 # -----------------------------
