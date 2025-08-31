@@ -8,7 +8,7 @@ from data._dsml_data import gsp_wls_edge, get_pflow
 from data_processing import PowerSystemDataLoader
 from models_ref import GAT_DSSE
 from models_GAT_NORM_DSSE import GAT_NORM_DSSE
-
+from model_FAIR_GAT_NORM_DSSE import FAIR_GAT_BILEVEL
 from loss import WLSLoss, PhysicalLoss, CombinedWLSPhysicalLoss
 
 from utils import get_device 
@@ -59,21 +59,21 @@ hyperparameters = {
 }
 
 # model_name = 'gat'
-model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
+# model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
+#                 dim_dense=hyperparameters['dim_hid'],
+#                 dim_out=hyperparameters['dim_out'],
+#                 heads=hyperparameters['heads'],
+#                 num_layers=hyperparameters['gnn_layers'],
+#                 edge_dim=hyperparameters['dim_lines'])
+
+model_name = 'lipchitz_gat'
+model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
                 dim_dense=hyperparameters['dim_hid'],
                 dim_out=hyperparameters['dim_out'],
                 heads=hyperparameters['heads'],
                 num_layers=hyperparameters['gnn_layers'],
                 edge_dim=hyperparameters['dim_lines'])
 
-
-# model_name = 'lipchitz_gat'
-# model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
-#                 dim_dense=hyperparameters['dim_hid'],
-#                 dim_out=hyperparameters['dim_out'],
-#                 heads=hyperparameters['heads'],
-#                 num_layers=hyperparameters['gnn_layers'],
-#                 edge_dim=hyperparameters['dim_lines'])
 
 # OPTIMIZER SETUP
 lr = 3e-3
