@@ -146,17 +146,13 @@ class PhysicalFollower(nn.Module):
     def __init__(self):
         super().__init__()
         # multipliers for voltage, angle, loading constraints
-        self.alpha_voltage = nn.Parameter(torch.ones(1))
-        self.alpha_angle = nn.Parameter(torch.ones(1))
-        self.alpha_loading = nn.Parameter(torch.ones(1))
+        self.reg_coefs = nn.Parameter(torch.ones(1))
         # wrapped PhysicalLoss
         self.phys_loss = PhysicalLoss()
 
     def forward(self, output, edge_index, node_param, edge_param, x_mean, x_std):
-        loss_dict = self.phys_loss(output, edge_index, node_param, edge_param, x_mean, x_std)
-        total = (self.alpha_voltage * loss_dict['voltage'] +
-                 self.alpha_angle * loss_dict['angle'] +
-                 self.alpha_loading * loss_dict['loading'])
+        loss_dict = self.phys_loss(output, edge_index, node_param, edge_param, x_mean, x_std, reg_coefs=self.reg_coefs)
+        total = loss_dict['total']
         return total, loss_dict
 
 
@@ -241,7 +237,7 @@ class FAIR_GAT_BILEVEL(nn.Module):
         y_pred = self.forward(x, edge_index, edge_attr)
 
         # WLS primary loss
-        wls_loss = self.criterion(input_data=input_data, edge_input=edge_input, output=y_pred,
+        wls_loss = self.criterion(input=input_data ,edge_input=edge_input, output=y_pred,
                                   x_mean=x_mean, x_std=x_std, edge_mean=edge_mean, edge_std=edge_std,
                                   edge_index=edge_index, node_param=node_param, edge_param=edge_param)
 
@@ -254,7 +250,5 @@ class FAIR_GAT_BILEVEL(nn.Module):
             'wls_loss': wls_loss.item(),
             'follower_loss': follower_loss.item(),
             'total_loss': total_loss.item(),
-            'alpha_voltage': self.follower.alpha_voltage.item(),
-            'alpha_angle': self.follower.alpha_angle.item(),
-            'alpha_loading': self.follower.alpha_loading.item()
+            'reg_coefs': self.follower.reg_coefs.item()
         }

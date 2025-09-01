@@ -101,15 +101,19 @@ for epoch in range(epochs):
             edge_index=data.edge_index,
             edge_attr=data.edge_attr[:, :num_efeat],
             input_data=data.x[:, :num_nfeat],
-            edge_input=data.edge_attr[:, :num_efeat],
+            edge_input=data.edge_attr[:, :num_efeat], # Why is this the same as edge input and edge attr?
             x_mean=X_MEAN.to(device),
             x_std=X_STD.to(device),
             edge_mean=PFLOW_MEAN.to(device),
             edge_std=PFLOW_STD.to(device),
             node_param=data.x[:, num_nfeat:],
-            edge_param=data.edge_attr[:, num_efeat:]
+            edge_param=data.edge_attr[:, num_efeat:] 
         )
         total_train_loss += out['total_loss']
+        # _loss_cmp = gsp_wls_edge(input=data.x[:,:num_nfeat], edge_input=data.edge_attr[:,:num_efeat],
+        #  output= out, x_mean=X_MEAN, x_std=X_STD, edge_mean = PFLOW_MEAN, edge_std = PFLOW_STD,
+        #  edge_index=data.edge_index, reg_coefs = reg_coefs,num_samples=data.batch[-1]+1,
+        #  node_param=data.x[:,num_nfeat:], edge_param = data.edge_attr[:,num_efeat:])
 
     avg_train_loss = total_train_loss / num_train_batches
 

@@ -58,21 +58,21 @@ hyperparameters = {
     'norm': 'lipschitznorm'
 }
 
-# model_name = 'gat'
-# model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
-#                 dim_dense=hyperparameters['dim_hid'],
-#                 dim_out=hyperparameters['dim_out'],
-#                 heads=hyperparameters['heads'],
-#                 num_layers=hyperparameters['gnn_layers'],
-#                 edge_dim=hyperparameters['dim_lines'])
-
-model_name = 'lipchitz_gat'
-model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
+model_name = 'gat'
+model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
                 dim_dense=hyperparameters['dim_hid'],
                 dim_out=hyperparameters['dim_out'],
                 heads=hyperparameters['heads'],
                 num_layers=hyperparameters['gnn_layers'],
                 edge_dim=hyperparameters['dim_lines'])
+
+# model_name = 'lipchitz_gat'
+# model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
+#                 dim_dense=hyperparameters['dim_hid'],
+#                 dim_out=hyperparameters['dim_out'],
+#                 heads=hyperparameters['heads'],
+#                 num_layers=hyperparameters['gnn_layers'],
+#                 edge_dim=hyperparameters['dim_lines'])
 
 
 # OPTIMIZER SETUP
