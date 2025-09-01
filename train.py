@@ -16,6 +16,7 @@ from utils import angular_mae, angular_rmse
 import live_plot
 
 # Global CONFIG
+torch.autograd.set_detect_anomaly(True)
 LIVE_PLOT = True
 
 # GENERAL PARAMETERS
@@ -66,13 +67,13 @@ model = GAT_DSSE(dim_feat= hyperparameters['dim_nodes'],
                 num_layers=hyperparameters['gnn_layers'],
                 edge_dim=hyperparameters['dim_lines'])
 
-# model_name = 'lipchitz_gat'
-# model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
-#                 dim_dense=hyperparameters['dim_hid'],
-#                 dim_out=hyperparameters['dim_out'],
-#                 heads=hyperparameters['heads'],
-#                 num_layers=hyperparameters['gnn_layers'],
-#                 edge_dim=hyperparameters['dim_lines'])
+model_name = 'lipchitz_gat'
+model = GAT_NORM_DSSE(dim_feat= hyperparameters['dim_nodes'],
+                dim_dense=hyperparameters['dim_hid'],
+                dim_out=hyperparameters['dim_out'],
+                heads=hyperparameters['heads'],
+                num_layers=hyperparameters['gnn_layers'],
+                edge_dim=hyperparameters['dim_lines'])
 
 
 # OPTIMIZER SETUP
@@ -81,9 +82,9 @@ optimizer = optim.Adamax(model.parameters(), lr=lr)
 
 
 # LOSS FUNCTION SETUP
-LAMBDA_WLS_VOLTAGE = 1e-8
-LAMBDA_WLS_PHASE = 1e-4
-LAMBDA_WLS_POWER_FLOW = 1e-8
+LAMBDA_WLS_VOLTAGE = 1e-4
+LAMBDA_WLS_PHASE = 1e-8
+LAMBDA_WLS_POWER_FLOW = 1e-6
 
 wls_loss = WLSLoss(
     lambda_voltage=LAMBDA_WLS_VOLTAGE,
@@ -91,10 +92,7 @@ wls_loss = WLSLoss(
     lambda_power_flow=LAMBDA_WLS_POWER_FLOW
 )
 
-LAMBDA_PHY_VOLTAGE = 1e-4
-LAMBDA_PHY_ANGLE = 1e-4
-LAMBDA_PHY_LOADING = 1e-4
-LAMBDA_REGULARIZATION = 1e-4
+LAMBDA_REGULARIZATION = 1e2
 physical_loss = PhysicalLoss(reg_weight=LAMBDA_REGULARIZATION)
 
 LAMBDA_WLS = 1e0
@@ -106,6 +104,16 @@ loss_fn = CombinedWLSPhysicalLoss(
     lambda_physical = LAMBDA_PHYSICAL
 )
 
+# coefficients for training loss, to tune to find good training conditions/balance
+mu_v = 1e-1
+reg_coefs = {
+'mu_v': mu_v,
+'mu_theta': mu_v,
+'lam_v': 1e-4,
+'lam_p': 1e-8,
+'lam_pf': 1e-6,
+'lam_reg': 1e2
+}
 
 # METRICS TRACKING
 train_list = []
@@ -166,8 +174,9 @@ for epoch in range(epochs):
             edge_param=data.edge_attr[:, num_efeat:]
         )
 
-        # _loss_cmp = gsp_wls_edge(input=data.x[:,:num_nfeat], edge_input=data.edge_attr[:,:num_efeat], output= out, x_mean=X_MEAN, x_std=X_STD, edge_mean = PFLOW_MEAN, edge_std = PFLOW_STD, edge_index=data.edge_index, reg_coefs = reg_coefs,num_samples=data.batch[-1]+1, node_param=data.x[:,num_nfeat:], edge_param = data.edge_attr[:,num_efeat:])
-        
+        _loss_cmp = gsp_wls_edge(input=data.x[:,:num_nfeat], edge_input=data.edge_attr[:,:num_efeat], output=out, x_mean=X_MEAN, x_std=X_STD, edge_mean = PFLOW_MEAN, edge_std = PFLOW_STD, edge_index=data.edge_index, reg_coefs = reg_coefs, num_samples=data.batch[-1]+1, node_param=data.x[:,num_nfeat:], edge_param = data.edge_attr[:,num_efeat:])
+        print(f"Loss: {_loss.item()} | Loss_cmp: {_loss_cmp.item()}")
+
         _loss.backward()
         optimizer.step()
         

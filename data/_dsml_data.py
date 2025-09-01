@@ -437,7 +437,7 @@ def gsp_wls_edge(input, edge_input, output, x_mean, x_std, edge_mean, edge_std, 
     
     v_i = output[:,0:1]*x_std[:1] + x_mean[:1] # [batch*num_nodes, 1]
     theta_i = output[:,1:] # [batch*num_nodes, 1]
-    theta_i *= (1.- node_param[:,1:2]) # Enforce theta_slack = 0.
+    theta_i = theta_i*(1.- node_param[:,1:2]) # Enforce theta_slack = 0.
     
     loading_lines, loading_trafos, p_from, q_from, p_to, q_to, i_from, i_to = get_pflow(torch.concat([v_i, theta_i], axis=1), edge_index, node_param, edge_param)
     
