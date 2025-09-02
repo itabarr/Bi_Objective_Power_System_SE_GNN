@@ -151,7 +151,7 @@ class PhysicalFollower(nn.Module):
         self.phys_loss = PhysicalLoss()
 
     def forward(self, output, edge_index, node_param, edge_param, x_mean, x_std):
-        loss_dict = self.phys_loss(output, edge_index, node_param, edge_param, x_mean, x_std, reg_coefs=self.reg_coefs)
+        loss_dict = self.phys_loss(output, edge_index, node_param, edge_param, x_mean, x_std)
         total = loss_dict['total']
         return total, loss_dict
 
@@ -237,7 +237,7 @@ class FAIR_GAT_BILEVEL(nn.Module):
         y_pred = self.forward(x, edge_index, edge_attr)
 
         # WLS primary loss
-        wls_loss = self.criterion(input=input_data ,edge_input=edge_input, output=y_pred,
+        wls_loss = self.criterion(input_data=input_data ,edge_input=edge_input, output=y_pred,
                                   x_mean=x_mean, x_std=x_std, edge_mean=edge_mean, edge_std=edge_std,
                                   edge_index=edge_index, node_param=node_param, edge_param=edge_param)
 
