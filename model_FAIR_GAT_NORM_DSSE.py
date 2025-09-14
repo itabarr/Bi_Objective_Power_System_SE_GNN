@@ -155,12 +155,11 @@ class PhysicalFollower(nn.Module):
         total = loss_dict['total']
         return total, loss_dict
 
-
 class FAIR_GAT_BILEVEL(nn.Module):
     """
     Bi-level GAT for DSSE.
-    Leader: minimize WLSLoss
-    Follower: minimize PhysicalLoss with learnable multipliers
+    Leader: odd layers + final projection -> minimize WLSLoss
+    Follower: even layers -> minimize PhysicalLoss
     """
     def __init__(self,
                  dim_feat, dim_dense, dim_out, num_layers, edge_dim,
@@ -170,45 +169,37 @@ class FAIR_GAT_BILEVEL(nn.Module):
 
         super().__init__()
 
-        # GAT backbone
+        # GAT backbone (split layers)
         self.model = GAT_NORM_DSSE(
-            dim_feat=dim_feat, dim_dense=dim_dense, dim_out=dim_dense,
+            dim_feat=dim_feat, dim_dense=dim_dense, dim_out=dim_out,
             num_layers=num_layers, edge_dim=edge_dim, heads=heads,
             concat=concat, slope=slope, self_loops=self_loops,
             dropout=dropout, nonlin=nonlin, lipschitz_norm=lipschitz_norm
         )
 
-        # Regression head: predicts node states (V, theta)
-        self.final_layer = nn.Linear(dim_dense, dim_out)
-
         # Losses
         self.criterion = WLSLoss()
-        self.follower = PhysicalFollower()
+        self.physical_loss = PhysicalLoss()
         self.fairness_alpha = fairness_alpha
 
+        # Parameter groups: odd (leader) vs even (follower)
+        leader_params = [p for i, l in enumerate(self.model.layers) if i % 2 == 0 for p in l.parameters()]
+        leader_params += list(self.model.projection.parameters())
+        follower_params = [p for i, l in enumerate(self.model.layers) if i % 2 == 1 for p in l.parameters()]
+
         # Optimizers
-        self.optimizer_G = torch.optim.Adam(
-            list(self.model.parameters()) + list(self.final_layer.parameters()),
-            lr=lr_g, weight_decay=weight_decay
-        )
-        self.optimizer_F = torch.optim.Adam(self.follower.parameters(), lr=lr_f, weight_decay=weight_decay)
+        self.optimizer_G = torch.optim.Adam(leader_params, lr=lr_g, weight_decay=weight_decay)
+        self.optimizer_F = torch.optim.Adam(follower_params, lr=lr_f, weight_decay=weight_decay)
 
         self.scheduler_G = ExponentialLR(self.optimizer_G, gamma=0.99)
         self.scheduler_F = ExponentialLR(self.optimizer_F, gamma=0.99)
 
     def forward(self, x, edge_index, edge_attr):
-        z = self.model(x, edge_index, edge_attr)
-        y = self.final_layer(z)
-        return y
+        return self.model(x, edge_index, edge_attr)
 
     def optimize_step(self, x, edge_index, edge_attr,
                       input_data, edge_input, x_mean, x_std, edge_mean, edge_std,
                       node_param, edge_param, idx_train=None, k_follower=1):
-        """
-        Single bilevel optimization step:
-        1) Inner loop: optimize follower (physical loss multipliers)
-        2) Outer loop: optimize leader (WLSLoss)
-        """
 
         if idx_train is None:
             idx_train = torch.arange(x.size(0), device=x.device)
@@ -216,32 +207,37 @@ class FAIR_GAT_BILEVEL(nn.Module):
         self.train()
 
         # ---------------------
-        # 1) Follower inner loop
+        # 1) Follower (even layers)
         # ---------------------
         for _ in range(k_follower):
             self.optimizer_F.zero_grad()
             y_pred = self.forward(x, edge_index, edge_attr)
-            phys_loss, _ = self.follower(y_pred, edge_index, node_param, edge_param, x_mean, x_std)
-            phys_loss.backward()
+            phys_dict = self.physical_loss(
+                y_pred, edge_index, node_param, edge_param, x_mean, x_std
+            )
+            follower_loss = phys_dict['total']
+            follower_loss.backward()
             self.optimizer_F.step()
 
-        # record follower loss
+        # Recompute follower loss without grad
         with torch.no_grad():
             y_pred = self.forward(x, edge_index, edge_attr)
-            follower_loss, _ = self.follower(y_pred, edge_index, node_param, edge_param, x_mean, x_std)
+            follower_loss = self.physical_loss(
+                y_pred, edge_index, node_param, edge_param, x_mean, x_std
+            )['total']
 
         # ---------------------
-        # 2) Leader outer loop
+        # 2) Leader (odd layers + projection)
         # ---------------------
         self.optimizer_G.zero_grad()
         y_pred = self.forward(x, edge_index, edge_attr)
 
-        # WLS primary loss
-        wls_loss = self.criterion(input_data=input_data ,edge_input=edge_input, output=y_pred,
-                                  x_mean=x_mean, x_std=x_std, edge_mean=edge_mean, edge_std=edge_std,
-                                  edge_index=edge_index, node_param=node_param, edge_param=edge_param)
+        wls_loss = self.criterion(
+            input_data=input_data, edge_input=edge_input, output=y_pred,
+            x_mean=x_mean, x_std=x_std, edge_mean=edge_mean, edge_std=edge_std,
+            edge_index=edge_index, node_param=node_param, edge_param=edge_param
+        )
 
-        # Total loss: WLS + alpha * follower (multiplier)
         total_loss = wls_loss + self.fairness_alpha * follower_loss
         total_loss.backward()
         self.optimizer_G.step()
@@ -249,6 +245,5 @@ class FAIR_GAT_BILEVEL(nn.Module):
         return {
             'wls_loss': wls_loss.item(),
             'follower_loss': follower_loss.item(),
-            'total_loss': total_loss.item(),
-            'reg_coefs': self.follower.reg_coefs.item()
+            'total_loss': total_loss.item()
         }

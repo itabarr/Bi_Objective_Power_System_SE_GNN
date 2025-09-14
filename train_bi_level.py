@@ -87,7 +87,7 @@ if LIVE_PLOT:
 # -----------------------------
 # TRAINING LOOP
 # -----------------------------
-epochs = 1000
+epochs = 100
 for epoch in range(epochs):
     # Training phase
     model.train()

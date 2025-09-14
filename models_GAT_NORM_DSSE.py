@@ -78,6 +78,7 @@ class GATv2ConvNorm(GATv2Conv):
         return alpha
 
 
+# Split the layers so we could use different optimizers for each
 class GAT_NORM_DSSE(nn.Module):
     def __init__(
         self,
@@ -92,13 +93,14 @@ class GAT_NORM_DSSE(nn.Module):
         self_loops: bool = True,
         dropout: float = 0.0,
         nonlin: str = 'leaky_relu',
-        lipschitz_norm: Optional[nn.Module] = None,   # allow override
+        lipschitz_norm: Optional[nn.Module] = None,
     ):
         super().__init__()
-        self.dim_out = dim_out
+
         self.num_layers = num_layers
         self.dim_feat = dim_feat
         self.dim_dense = dim_dense
+        self.dim_out = dim_out
         self.edge_dim = edge_dim
 
         self.channels = dim_feat
@@ -121,15 +123,16 @@ class GAT_NORM_DSSE(nn.Module):
         else:
             raise ValueError('invalid activation type')
 
-        nn_layer = []
-
-        # Lipschitz normalization: default if not provided
+        # default Lipschitz normalization
         if lipschitz_norm is None:
             lipschitz_norm = LipschitzNorm(att_norm=4.0, eps=1e-12)
 
-        # stack GATv2ConvNorm blocks
+        # ----------------------------------
+        # GAT stack: now as explicit layers
+        # ----------------------------------
+        self.layers = nn.ModuleList()
         for _ in range(self.num_layers - 1):
-            hyper = dict(
+            layer = GATv2ConvNorm(
                 in_channels=self.channels,
                 out_channels=self.channels,
                 heads=self.heads,
@@ -141,20 +144,23 @@ class GAT_NORM_DSSE(nn.Module):
                 enable_lip=True,
                 lipschitz_norm=lipschitz_norm,
             )
-            nn_layer.extend([
-                (GATv2ConvNorm(**hyper), 'x, edge_index, edge_attr -> x'),
-                self.nonlin,
-            ])
+            self.layers.append(layer)
 
-        # projection head
-        nn_layer.extend([
-            Linear(in_features=self.dim_hidden, out_features=self.dim_dense),
+        # ----------------------------------
+        # Projection head (dense MLP)
+        # ----------------------------------
+        self.projection = nn.Sequential(
+            Linear(self.dim_hidden, self.dim_dense),
             self.nonlin,
-            Linear(in_features=self.dim_dense, out_features=self.dim_out),
-        ])
-
-        self.model = nn_geo.Sequential('x, edge_index, edge_attr', nn_layer)
+            Linear(self.dim_dense, self.dim_out)
+        )
 
     def forward(self, x, edge_index, edge_attr):
-        return self.model(x, edge_index, edge_attr)
+        # go through GAT layers
+        for layer in self.layers:
+            x = layer(x, edge_index, edge_attr)
+            x = self.nonlin(x)
 
+        # then projection MLP
+        x = self.projection(x)
+        return x
