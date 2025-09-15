@@ -34,7 +34,7 @@ class PowerSystemDataLoader:
             num_emeas: Number of edge measurements
         """
 
-        options = ['cigre14', 'cigr14-reswitched', 'ober_sub']
+        options = ['cigre14', 'cigre14_reswitched', 'ober_sub']
         if case not in options:
             raise ValueError(f"Unsupported case: {case}. Only {options} are supported.")
         
@@ -68,7 +68,7 @@ class PowerSystemDataLoader:
     def _get_measurement_indices(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get measurement indices based on the case type."""
         
-        if self.case == 'cigre14' or self.case == 'cigr14-reswitched':
+        if self.case == 'cigre14' or self.case == 'cigre14_reswitched':
             meas_v = np.array([0, 1, 12, 7, 11, 14])
             meas_pflow = np.array([0, 10])
 
@@ -77,7 +77,7 @@ class PowerSystemDataLoader:
             meas_pflow = np.array([40, 43, 11, 21, 54, 57])
         
         else:
-            raise ValueError(f"Unsupported case: {self.case}. Only 'cigre14', 'cigr14-reswitched', and 'ober_sub' are supported.")
+            raise ValueError(f"Unsupported case: {self.case}. Only 'cigre14', 'cigre14_reswitched', and 'ober_sub' are supported.")
 
         return meas_v, meas_pflow
 

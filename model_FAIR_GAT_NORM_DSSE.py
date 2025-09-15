@@ -224,7 +224,7 @@ class FAIR_GAT_BILEVEL(nn.Module):
             y_pred = self.forward(x, edge_index, edge_attr)
             follower_loss = self.physical_loss(
                 y_pred, edge_index, node_param, edge_param, x_mean, x_std
-            )['total']
+            )['total'] * self.fairness_alpha
 
         # ---------------------
         # 2) Leader (odd layers + projection)
@@ -238,7 +238,7 @@ class FAIR_GAT_BILEVEL(nn.Module):
             edge_index=edge_index, node_param=node_param, edge_param=edge_param
         )
 
-        total_loss = wls_loss + self.fairness_alpha * follower_loss
+        total_loss = wls_loss + follower_loss
         total_loss.backward()
         self.optimizer_G.step()
 

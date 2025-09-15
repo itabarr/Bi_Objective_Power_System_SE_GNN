@@ -25,7 +25,7 @@ device = get_device()
 # -----------------------------
 # DATA LOADING
 # -----------------------------
-case = 'cigre14'
+case = 'ober_sub'
 batch_size = 64
 split_coef = 0.9
 
@@ -58,11 +58,12 @@ model = FAIR_GAT_BILEVEL(
     heads=hyperparameters['heads'],
     num_layers=hyperparameters['gnn_layers'],
     edge_dim=hyperparameters['dim_lines'],
-    fairness_alpha=100.0,
+    fairness_alpha=1.0,
     lr_g=1e-3,
     lr_f=1e-2,
     weight_decay=1e-5,
-    lipschitz_norm=hyperparameters['norm']
+    lipschitz_norm=hyperparameters['norm'],
+    dropout=hyperparameters['dropout_rate']
 )
 model = model.to(device)
 
@@ -87,7 +88,7 @@ if LIVE_PLOT:
 # -----------------------------
 # TRAINING LOOP
 # -----------------------------
-epochs = 100
+epochs = 15
 for epoch in range(epochs):
     # Training phase
     model.train()
