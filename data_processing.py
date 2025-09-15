@@ -11,6 +11,7 @@ from typing import Tuple, List, Dict, Any, Optional
 import os
 
 
+
 class PowerSystemDataLoader:
     """
     A class to handle power system data loading and preprocessing.
@@ -315,9 +316,9 @@ class PowerSystemDataLoader:
 # Example usage
 if __name__ == "__main__":
     # Create data loader with default configuration
-    power_system_dataset = PowerSystemDataset(case='cigre14', batch_size=64, split_coef=0.9)
-
-
+    power_system_dataset = PowerSystemDataLoader(case='cigre14', batch_size=64, split_coef=0.9)
+    train_loader, val_loader = power_system_dataset.setup_complete_pipeline()
+    print('hi')
 
 
 
