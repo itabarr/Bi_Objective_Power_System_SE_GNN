@@ -186,12 +186,14 @@ class FAIR_GAT_BILEVEL(nn.Module):
         leader_params = [p for i, l in enumerate(self.model.layers) if i % 2 == 0 for p in l.parameters()]
         leader_params += list(self.model.projection.parameters())
         follower_params = [p for i, l in enumerate(self.model.layers) if i % 2 == 1 for p in l.parameters()]
+        self.leader_params = leader_params
+        self.follower_params = follower_params
 
         # Optimizers
-        self.optimizer_G = torch.optim.Adam(leader_params, lr=lr_g, weight_decay=weight_decay)
+        self.optimizer_G = torch.optim.Adam(leader_params, lr=lr_g, weight_decay=weight_decay*10) # TODO: test weight decay*10
         self.optimizer_F = torch.optim.Adam(follower_params, lr=lr_f, weight_decay=weight_decay)
 
-        self.scheduler_G = ExponentialLR(self.optimizer_G, gamma=0.99)
+        self.scheduler_G = ExponentialLR(self.optimizer_G, gamma=0.99) # TODO: remove schedulers if not used
         self.scheduler_F = ExponentialLR(self.optimizer_F, gamma=0.99)
 
     def forward(self, x, edge_index, edge_attr):
@@ -199,7 +201,7 @@ class FAIR_GAT_BILEVEL(nn.Module):
 
     def optimize_step(self, x, edge_index, edge_attr,
                       input_data, edge_input, x_mean, x_std, edge_mean, edge_std,
-                      node_param, edge_param, idx_train=None, k_follower=1):
+                      node_param, edge_param, idx_train=None, k_follower=1, print_loss=False):
 
         if idx_train is None:
             idx_train = torch.arange(x.size(0), device=x.device)
@@ -218,13 +220,14 @@ class FAIR_GAT_BILEVEL(nn.Module):
             follower_loss = phys_dict['total']
             follower_loss.backward()
             self.optimizer_F.step()
+            if print_loss: print(f"Physical loss (follower): {follower_loss.item()}")
 
         # Recompute follower loss without grad
-        with torch.no_grad():
-            y_pred = self.forward(x, edge_index, edge_attr)
-            follower_loss = self.physical_loss(
-                y_pred, edge_index, node_param, edge_param, x_mean, x_std
-            )['total'] * self.fairness_alpha
+        # with torch.no_grad():
+        #     y_pred = self.forward(x, edge_index, edge_attr)
+        #     follower_loss = self.physical_loss(
+        #         y_pred, edge_index, node_param, edge_param, x_mean, x_std
+        #     )['total'] * self.fairness_alpha
 
         # ---------------------
         # 2) Leader (odd layers + projection)
@@ -237,9 +240,10 @@ class FAIR_GAT_BILEVEL(nn.Module):
             x_mean=x_mean, x_std=x_std, edge_mean=edge_mean, edge_std=edge_std,
             edge_index=edge_index, node_param=node_param, edge_param=edge_param
         )
-
+        if print_loss: print(f"WLS loss (leader): {wls_loss.item()}")
         total_loss = wls_loss + follower_loss
-        total_loss.backward()
+        wls_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.leader_params, max_norm=1.0)
         self.optimizer_G.step()
 
         return {

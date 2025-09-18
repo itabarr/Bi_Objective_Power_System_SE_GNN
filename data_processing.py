@@ -9,7 +9,7 @@ from torch_geometric.data import Dataset, Data
 import random
 from typing import Tuple, List, Dict, Any, Optional
 import os
-
+import simbench as sb
 
 
 class PowerSystemDataLoader:
@@ -318,6 +318,8 @@ if __name__ == "__main__":
     # Create data loader with default configuration
     power_system_dataset = PowerSystemDataLoader(case='cigre14', batch_size=64, split_coef=0.9)
     train_loader, val_loader = power_system_dataset.setup_complete_pipeline()
+
+    net = sb.get_simbench_net("1-MV-urban--0-sw")
     print('hi')
 
 
